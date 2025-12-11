@@ -1,0 +1,8 @@
+# Core dependencies for convert_fp8_svd_learn_w_blockwise_comfy_rev2.py
+torch>=2.1.0
+safetensors>=0.4.2
+tqdm
+prodigy-plus-schedule-free
+
+# Optional: For INT8 Triton kernels (quant_ops.py runtime inference)
+# triton>=2.1.0
