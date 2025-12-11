@@ -1,9 +1,0 @@
-[submodule "ComfyUI_Custom_Nodes_Agent"]
-	path = ComfyUI_Custom_Nodes_Agent
-	url = https://github.com/silveroxides/ComfyUI_Custom_Nodes_Agent.git
-[submodule "ComfyUI"]
-	path = ComfyUI
-	url = https://github.com/silveroxides/ComfyUI.git
-[submodule "bitsandbytes"]
-	path = bitsandbytes
-	url = https://github.com/bitsandbytes-foundation/bitsandbytes
