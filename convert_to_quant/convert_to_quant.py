@@ -1016,7 +1016,7 @@ class LearnedRoundingConverter:
 def convert_to_fp8_scaled(
     input_file: str, output_file: str, comfy_quant: bool, t5xxl: bool, distillation_large: bool,
     distillation_small: bool, nerf_large: bool, nerf_small: bool,
-    radiance: bool, wan: bool, qwen: bool, hunyuan: bool, zimage_l: bool, zimage_s: bool, zimage_refiner: bool, calib_samples: int, seed: int,
+    radiance: bool, wan: bool, qwen: bool, hunyuan: bool, zimage: bool, zimage_refiner: bool, calib_samples: int, seed: int,
     int8: bool = False, nf4: bool = False, fp4: bool = False,
     fallback: Optional[str] = None, custom_layers: Optional[str] = None, custom_type: Optional[str] = None,
     custom_block_size: Optional[int] = None, custom_simple: bool = False, custom_heur: bool = False,
@@ -1184,9 +1184,7 @@ def convert_to_fp8_scaled(
                 exclusion_reason = "WAN exclusion"
             elif qwen and any(n in key for n in QWEN_AVOID_KEY_NAMES):
                 exclusion_reason = "Qwen Image exclusion"
-            elif zimage_l and any(n in key for n in ZIMAGE_AVOID_KEY_NAMES):
-                exclusion_reason = "Z-Image exclusion"
-            elif zimage_s and any(n in key for n in ZIMAGE_AVOID_KEY_NAMES):
+            elif (zimage or zimage_refiner) and any(n in key for n in ZIMAGE_AVOID_KEY_NAMES):
                 exclusion_reason = "Z-Image exclusion"
             elif hunyuan and any(n in key for n in HUNYUAN_AVOID_KEY_NAMES):
                 exclusion_reason = "Hunyuan Video 1.5 exclusion"
@@ -1202,7 +1200,7 @@ def convert_to_fp8_scaled(
                 exclusion_reason = "WAN layer keep in high precision"
             elif qwen and any(n in key for n in QWEN_LAYER_KEYNAMES):
                 exclusion_reason = "Qwen Image layer keep in high precision"
-            elif zimage_l and any(n in key for n in ZIMAGE_LAYER_KEYNAMES):
+            elif zimage and any(n in key for n in ZIMAGE_LAYER_KEYNAMES):
                 exclusion_reason = "Z-Image layer keep in high precision"
             elif zimage_refiner and any(n in key for n in ZIMAGE_REFINER_LAYER_KEYNAMES):
                 exclusion_reason = "Z-Image refiner layer keep in high precision"
@@ -1424,8 +1422,7 @@ def main():
     parser.add_argument("--wan", action='store_true', help="Exclude known WAN layers.")
     parser.add_argument("--qwen", action='store_true', help="Exclude known Qwen Image layers.")
     parser.add_argument("--hunyuan", action='store_true', help="Exclude known Hunyuan Video 1.5 layers.")
-    parser.add_argument("--zimage_l", action='store_true', help="Exclude known Z-Image layers.")
-    parser.add_argument("--zimage_s", action='store_true', help="Exclude known Z-Image layers.")
+    parser.add_argument("--zimage", action='store_true', help="Exclude known Z-Image layers.")
     parser.add_argument("--zimage_refiner", action='store_true', help="Exclude known Z-Image refiner layers (context_refiner, noise_refiner).")
     parser.add_argument("--full_matrix", action='store_true', help="If should use torch.linalg.svd with full matices instead of the torch.svd_lowrank.")
     parser.add_argument("--scaling_mode", type=str, default="tensor", choices=["tensor", "block"], help="Quantization scaling mode.")
@@ -1518,7 +1515,7 @@ def main():
 
     # Separate converter kwargs from function kwargs
     excluded_keys = ['input', 'output', 'comfy_quant', 't5xxl', 'distillation_large', 'distillation_small', 
-                     'nerf_large', 'nerf_small', 'radiance', 'wan', 'qwen', 'hunyuan', 'zimage_l', 'zimage_s', 'zimage_refiner',
+                     'nerf_large', 'nerf_small', 'radiance', 'wan', 'qwen', 'hunyuan', 'zimage', 'zimage_refiner',
                      'calib_samples', 'manual_seed', 'int8', 'nf4', 'fp4', 'fallback', 'custom_layers', 'custom_type',
                      'custom_block_size', 'custom_simple', 'custom_heur', 'fallback_block_size', 'fallback_simple',
                      'full_precision_matrix_mult', 'heur', 'input_scale', 'simple']
@@ -1527,7 +1524,7 @@ def main():
     convert_to_fp8_scaled(
         args.input, output_file, args.comfy_quant, args.t5xxl, args.distillation_large,
         args.distillation_small, args.nerf_large, args.nerf_small,
-        args.radiance, args.wan, args.qwen, args.hunyuan, args.zimage_l, args.zimage_s, args.zimage_refiner, args.calib_samples, seed,
+        args.radiance, args.wan, args.qwen, args.hunyuan, args.zimage, args.zimage_refiner, args.calib_samples, seed,
         int8=args.int8, nf4=args.nf4, fp4=args.fp4,
         fallback=args.fallback, custom_layers=args.custom_layers, custom_type=args.custom_type,
         custom_block_size=args.custom_block_size, custom_simple=args.custom_simple, custom_heur=args.custom_heur,
