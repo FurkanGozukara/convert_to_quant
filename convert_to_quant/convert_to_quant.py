@@ -40,7 +40,12 @@ except ImportError:
 
 # --- Constants and Configuration ---
 torch.set_printoptions(precision=8)
-AVOID_KEY_NAMES = ["norm", "bias", "embed_tokens", "shared", "patch_embedding", "audio_model.patch_embedding", "ref_conv", "control_adapter", "motion_encoder.enc.net_app", "face_encoder.conv", "pose_patch_embedding", "motion_encoder.enc.fc", "img_emb.proj", "q_norm", "motion_encoder.dec", "head.modulation", "casual_audio_encoder", "cond_encoder", "frame_packer", "norm_k", "norm_q"]
+AVOID_KEY_NAMES = [
+    "norm", "bias", "embed_tokens", "shared", "patch_embedding", "audio_model.patch_embedding", "ref_conv", "control_adapter",
+    "motion_encoder.enc.net_app", "face_encoder.conv", "pose_patch_embedding", "motion_encoder.enc.fc", "img_emb.proj", "q_norm",
+    "motion_encoder.dec", "head.modulation", "casual_audio_encoder", "cond_encoder", "frame_packer", "norm_k", "norm_q",
+    "tekken_model", "multi_modal_projector", "patch_conv", "ln_pre", "input_layernorm", "attention_norm", "post_attention_layernorm"
+    ]
 T5XXL_REMOVE_KEY_NAMES = ["decoder", "lm_head"]
 QWEN_AVOID_KEY_NAMES = ["norm_added_k", "norm_added_q", "norm_k", "norm_q", "txt_norm"]
 HUNYUAN_AVOID_KEY_NAMES = ["layernorm", "img_attn_k_norm", "img_attn_q_norm", "txt_attn_k_norm", "txt_attn_q_norm", "norm1", "norm2", "vision_in.proj.0", "vision_in.proj.4", "img_in.proj", "cond_type_embedding"]
@@ -1033,7 +1038,7 @@ class LearnedRoundingConverter:
 # --- Main script execution functions ---
 
 def convert_to_fp8_scaled(
-    input_file: str, output_file: str, comfy_quant: bool, t5xxl: bool, distillation_large: bool,
+    input_file: str, output_file: str, comfy_quant: bool, t5xxl: bool, mistral: bool, distillation_large: bool,
     distillation_small: bool, nerf_large: bool, nerf_small: bool,
     radiance: bool, wan: bool, qwen: bool, hunyuan: bool, zimage: bool, zimage_refiner: bool, calib_samples: int, seed: int,
     int8: bool = False, nf4: bool = False, fp4: bool = False,
@@ -1195,8 +1200,8 @@ def convert_to_fp8_scaled(
 
         # Check exclusion filters (only matters if not custom matched)
         if not use_custom:
-            if t5xxl and any(n in key for n in AVOID_KEY_NAMES):
-                exclusion_reason = "T5XXL exclusion"
+            if (t5xxl or mistral) and any(n in key for n in AVOID_KEY_NAMES):
+                exclusion_reason = "T5XXL/Mistral exclusion"
             elif radiance and any(n in key for n in RADIANCE_LAYER_KEYNAMES):
                 exclusion_reason = "Radiance exclusion"
             elif wan and any(n in key for n in AVOID_KEY_NAMES):
@@ -1350,8 +1355,8 @@ def convert_to_fp8_scaled(
                         del W_orig_dev, W_dequant_dev, X_calib_dev, b_orig_dev, weight_error, output_error, bias_correction, b_new
                         if device == 'cuda': torch.cuda.empty_cache()
 
-        # T5XXL always needs input_scale regardless of --include_input_scale flag
-        if t5xxl and f"{base_name}.input_scale" not in new_tensors:
+        # T5XXL/Mistral always needs input_scale regardless of --include_input_scale flag
+        if (t5xxl or mistral) and f"{base_name}.input_scale" not in new_tensors:
             new_tensors[f"{base_name}.input_scale"] = dequant_s.to(device='cpu', dtype=SCALE_DTYPE).detach().clone()
 
         # Get scale key name based on comfy_quant mode
@@ -1372,7 +1377,7 @@ def convert_to_fp8_scaled(
 
     # Add scaled_fp8 marker only for legacy non-comfy_quant FP8 format
     if not comfy_quant and not int8 and not custom_layers and "scaled_fp8" not in new_tensors:
-        new_tensors["scaled_fp8"] = torch.empty((0), dtype=TARGET_FP8_DTYPE) if t5xxl else torch.empty((2), dtype=TARGET_FP8_DTYPE)
+        new_tensors["scaled_fp8"] = torch.empty((0), dtype=TARGET_FP8_DTYPE) if (t5xxl or mistral) else torch.empty((2), dtype=TARGET_FP8_DTYPE)
 
     print(f"Saving {len(new_tensors)} tensors to {output_file}")
     try:
@@ -1434,6 +1439,7 @@ def main():
     parser.add_argument("--heur", action='store_true', help="Skip layers with poor quantization characteristics (aspect ratio, size).")
     parser.add_argument("--input_scale", action='store_true', help="Include input_scale tensor for FP8 (uses weight_scale as default). Always enabled for T5XXL.")
     parser.add_argument("--t5xxl", action='store_true', help="Apply exclusions for T5XXL Text Encoder models.")
+    parser.add_argument("--mistral", action='store_true', help="Apply exclusions for Mistral Text Encoder models.")
     parser.add_argument("--distillation_large", action='store_true', help="Exclude known distillation layers and other sensitive.")
     parser.add_argument("--distillation_small", action='store_true', help="Exclude known distillation layers.")
     parser.add_argument("--nerf_large", action='store_true', help="Exclude known NeRF layers, distillation layers and txt_in.")
@@ -1531,7 +1537,7 @@ def main():
         else:
             format_str = TARGET_FP8_DTYPE.__str__().split('.')[-1]
             scaling_str = f"_{args.scaling_mode}"
-        flags = "".join(["_t5" if args.t5xxl else "", "_nodist_l" if args.distillation_large else "", "_nodist_s" if args.distillation_small else "", "_nonerf_l" if args.nerf_large else "", "_nonerf_s" if args.nerf_small else "", "_norad" if args.radiance else ""])
+        flags = "".join(["_t5" if args.t5xxl else "", "_mistral" if args.mistral else "", "_nodist_l" if args.distillation_large else "", "_nodist_s" if args.distillation_small else "", "_nonerf_l" if args.nerf_large else "", "_nonerf_s" if args.nerf_small else "", "_norad" if args.radiance else ""])
         output_file = f"{base}_{format_str}{scaling_str}{flags}_k{args.min_k}-{args.max_k}_p{args.top_p}_lr{args.lr}.safetensors"
     else:
         output_file = args.output
@@ -1544,7 +1550,7 @@ def main():
     print(f"Using seed: {seed}")
 
     # Separate converter kwargs from function kwargs
-    excluded_keys = ['input', 'output', 'comfy_quant', 't5xxl', 'distillation_large', 'distillation_small', 
+    excluded_keys = ['input', 'output', 'comfy_quant', 't5xxl', 'mistral', 'distillation_large', 'distillation_small', 
                      'nerf_large', 'nerf_small', 'radiance', 'wan', 'qwen', 'hunyuan', 'zimage', 'zimage_refiner',
                      'calib_samples', 'manual_seed', 'int8', 'nf4', 'fp4', 'fallback', 'custom_layers', 'custom_type',
                      'custom_block_size', 'custom_simple', 'custom_heur', 'fallback_block_size', 'fallback_simple',
@@ -1552,7 +1558,7 @@ def main():
     converter_kwargs = {k: v for k, v in vars(args).items() if k not in excluded_keys}
 
     convert_to_fp8_scaled(
-        args.input, output_file, args.comfy_quant, args.t5xxl, args.distillation_large,
+        args.input, output_file, args.comfy_quant, args.t5xxl, args.mistral, args.distillation_large,
         args.distillation_small, args.nerf_large, args.nerf_small,
         args.radiance, args.wan, args.qwen, args.hunyuan, args.zimage, args.zimage_refiner, args.calib_samples, seed,
         int8=args.int8, nf4=args.nf4, fp4=args.fp4,
