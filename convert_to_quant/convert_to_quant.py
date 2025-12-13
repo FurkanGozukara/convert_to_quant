@@ -42,7 +42,7 @@ except ImportError:
 torch.set_printoptions(precision=8)
 AVOID_KEY_NAMES = [
     "norm", "bias", "embed_tokens", "shared", "patch_embedding", "audio_model.patch_embedding", "ref_conv", "control_adapter",
-    "motion_encoder.enc.net_app", "face_encoder.conv", "pose_patch_embedding", "motion_encoder.enc.fc", "img_emb.proj", "q_norm",
+    "motion_encoder.enc.net_app", "face_encoder.conv", "pose_patch_embedding", "motion_encoder.enc.fc", "img_emb.proj", "k_norm", "q_norm",
     "motion_encoder.dec", "head.modulation", "casual_audio_encoder", "cond_encoder", "frame_packer", "norm_k", "norm_q",
     "tekken_model", "multi_modal_projector", "patch_conv", "ln_pre", "input_layernorm", "attention_norm", "post_attention_layernorm"
     ]
@@ -92,7 +92,8 @@ def create_comfy_quant_tensor(format_type: str, block_size: Optional[int] = None
     Create a .comfy_quant tensor for ComfyUI quantization metadata.
     
     Args:
-        format_type: One of "float8_e4m3fn", "int8_blockwise", "int8_lodewise", "bnb_nf4", or "bnb_fp4"
+        format_type: One of "float8_e4m3fn", "float8_e4m3fn_rowwise", "float8_e4m3fn_blockwise",
+                     "int8_blockwise", "int8_lodewise", "bnb_nf4", or "bnb_fp4"
         block_size: Block/group size for quantization (required for block-based formats)
         full_precision_matrix_mult: If True, adds "full_precision_matrix_mult": True to metadata.
                                     If False or None, this key is omitted entirely.
@@ -106,9 +107,12 @@ def create_comfy_quant_tensor(format_type: str, block_size: Optional[int] = None
     comfy_quant = {"format": format_type}
     
     # Build params sub-object - ComfyUI ops.py reads from layer_conf["params"]["group_size"]
+    # Include block_size for all block-based formats
     params = {}
-    if block_size is not None and format_type in ("int8_blockwise", "int8_lodewise", "bnb_nf4", "bnb_fp4"):
+    BLOCK_BASED_FORMATS = ("int8_blockwise", "int8_lodewise", "bnb_nf4", "bnb_fp4", "float8_e4m3fn_blockwise")
+    if block_size is not None and format_type in BLOCK_BASED_FORMATS:
         params["group_size"] = block_size
+
     
     if params:
         comfy_quant["params"] = params
@@ -216,10 +220,11 @@ class LearnedRoundingConverter:
         if self.optimizer_choice == 'original':
             print(f"  - LR schedule: {self.lr_schedule}")
         print(f"  - Scaling mode: {self.scaling_mode}")
-        if self.scaling_mode == 'block':
+        if self.scaling_mode in ('block', 'block2d'):
             print(f"    - Block size: {self.block_size}")
         if self.target_format == 'int8':
             print(f"  - Kernel backend: {self.kernel_backend}")
+
 
     def _optimize_ppsf(self, W_float32: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor) -> torch.Tensor:
         W_rounded = (W_float32 * scale).to(TARGET_FP8_DTYPE).to(COMPUTE_DTYPE)
@@ -463,18 +468,33 @@ class LearnedRoundingConverter:
             print("  - Tensor is all zeros, skipping optimization.")
             quantized_tensor = torch.zeros_like(W_float32, dtype=self.target_dtype)
             dequant_scale = None
-            if self.scaling_mode == 'block' and W_float32.ndim == 2 and W_float32.shape[1] > 0 and W_float32.shape[1] % self.block_size == 0:
+            
+            if W_float32.ndim == 2:
                 out_features, in_features = W_float32.shape
+                
                 if self.target_format == 'int8':
                     # INT8 uses 2D block scaling (M//block_size, N//block_size)
                     num_blocks_m = out_features // self.block_size
                     num_blocks_n = in_features // self.block_size
                     dequant_scale = torch.ones(num_blocks_m, num_blocks_n, device=self.device, dtype=SCALE_DTYPE)
-                else:
+                elif self.scaling_mode == 'row':
+                    # Row-wise: one scale per row
+                    dequant_scale = torch.ones(out_features, device=self.device, dtype=SCALE_DTYPE)
+                elif self.scaling_mode == 'block2d' and out_features % self.block_size == 0 and in_features % self.block_size == 0:
+                    # 2D block-wise: (M//bs, N//bs)
+                    num_blocks_m = out_features // self.block_size
+                    num_blocks_n = in_features // self.block_size
+                    dequant_scale = torch.ones(num_blocks_m, num_blocks_n, device=self.device, dtype=SCALE_DTYPE)
+                elif self.scaling_mode == 'block' and in_features > 0 and in_features % self.block_size == 0:
+                    # Per-row-group: (out_features, num_blocks, 1)
                     num_blocks = in_features // self.block_size
                     dequant_scale = torch.ones(out_features, num_blocks, 1, device=self.device, dtype=SCALE_DTYPE)
+                else:
+                    # Tensor-wise: single scale
+                    dequant_scale = torch.ones(1, device=self.device, dtype=SCALE_DTYPE)
             else:
                 dequant_scale = torch.ones(1, device=self.device, dtype=SCALE_DTYPE)
+            
             return quantized_tensor, dequant_scale, torch.zeros_like(W_float32)
 
         # INT8 quantization path
@@ -489,8 +509,15 @@ class LearnedRoundingConverter:
         if self.target_format == 'fp4':
             return self._convert_fp4(W_float32)
         
-        # FP8 quantization path (original behavior)
-        return self._convert_fp8(W_float32)
+        # FP8 quantization path - route based on scaling_mode
+        if self.scaling_mode == 'row':
+            return self._convert_fp8_rowwise(W_float32)
+        elif self.scaling_mode == 'block2d':
+            return self._convert_fp8_block2d(W_float32)
+        else:
+            # 'tensor' or 'block' (original per-row-group) mode
+            return self._convert_fp8(W_float32)
+
 
     def _convert_int8(self, W_float32: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -1035,6 +1062,183 @@ class LearnedRoundingConverter:
 
         return W_f8, dequant_scale.to(device=self.device, dtype=SCALE_DTYPE), dequantized_weight_tensor
 
+    def _convert_fp8_rowwise(self, W_float32: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Row-wise FP8 quantization - one scale per row.
+        
+        Scale shape: (out_features,)
+        Good balance between accuracy and memory for most weight matrices.
+        """
+        M, N = W_float32.shape
+        print(f"    - Using row-wise FP8 scaling (1 scale per row).")
+        
+        # Compute per-row max
+        row_max = W_float32.abs().amax(dim=1, keepdim=True)  # (M, 1)
+        quant_scale = self.f8_max_val / row_max.clamp_min_(1e-12)  # (M, 1)
+        
+        if self.no_learned_rounding:
+            print(f"    - Simple quantization (no learned rounding).")
+            with torch.no_grad():
+                W_scaled = W_float32 * quant_scale
+                W_f8 = W_scaled.clamp(-self.f8_max_val, self.f8_max_val).to(TARGET_FP8_DTYPE)
+                dequant_scale = (1.0 / quant_scale).squeeze(1)  # (M,)
+                dequantized = W_f8.to(COMPUTE_DTYPE) / quant_scale
+            
+            del W_float32
+            gc.collect()
+            if self.device == 'cuda':
+                torch.cuda.empty_cache()
+            
+            return W_f8, dequant_scale.to(device=self.device, dtype=SCALE_DTYPE), dequantized
+        
+        # With learned rounding optimization
+        max_rank = min(W_float32.shape)
+        k = min(self.max_k, max(self.min_k, int(math.floor(self.top_p * max_rank))))
+        k = min(k, max_rank)
+        
+        print(f"    - Tensor shape: {list(W_float32.shape)}, Max rank: {max_rank}. Using k={k} components.")
+        
+        if self.full_matrix:
+            print(f"Using torch.linalg.svd with full_matrices=True")
+            U, _, Vh = torch.linalg.svd(W_float32, full_matrices=True, driver='gesvd')
+        else:
+            try:
+                print(f"Trying svd_lowrank")
+                U, _, Vh = torch.svd_lowrank(W_float32, q=min(k + 10, max_rank), niter=4)
+                Vh = Vh.T
+            except RuntimeError:
+                print("    - svd_lowrank failed, falling back to full SVD.")
+                U, _, Vh = torch.linalg.svd(W_float32, full_matrices=False)
+        
+        U_k, Vh_k = U[:, :k], Vh[:k, :]
+        
+        # Use the appropriate optimizer with row-wise scale
+        scale = quant_scale  # (M, 1) for broadcast
+        if self.optimizer_choice == 'ppsf':
+            final_tensor_scaled = self._optimize_ppsf(W_float32, scale, U_k, Vh_k)
+        elif self.optimizer_choice == 'adamw':
+            final_tensor_scaled = self._optimize_adamw(W_float32, scale, U_k, Vh_k)
+        elif self.optimizer_choice == 'radam':
+            final_tensor_scaled = self._optimize_radam(W_float32, scale, U_k, Vh_k)
+        elif self.optimizer_choice == 'original':
+            final_tensor_scaled = self._optimize_original(W_float32, scale, U_k, Vh_k)
+        else:
+            raise ValueError(f"Unknown optimizer: '{self.optimizer_choice}'")
+        
+        final_tensor_scaled.clamp_(-self.f8_max_val, self.f8_max_val)
+        
+        with torch.no_grad():
+            W_f8 = final_tensor_scaled.to(TARGET_FP8_DTYPE)
+            dequant_scale = (1.0 / quant_scale).squeeze(1)  # (M,)
+            dequant_scale = dequant_scale.to(device=self.device, dtype=SCALE_DTYPE)
+            dequantized = W_f8.to(COMPUTE_DTYPE) / quant_scale
+        
+        del W_float32, scale, U, Vh, U_k, Vh_k, final_tensor_scaled, quant_scale
+        gc.collect()
+        if self.device == 'cuda':
+            torch.cuda.empty_cache()
+        
+        return W_f8, dequant_scale, dequantized
+
+    def _convert_fp8_block2d(self, W_float32: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        True 2D block-wise FP8 quantization - one scale per block_size x block_size tile.
+        
+        Scale shape: (M // block_size, N // block_size)
+        Similar to INT8 block-wise scaling, optimized for tiled GEMM inference.
+        """
+        M, N = W_float32.shape
+        bs = self.block_size
+        
+        # Validate dimensions
+        if M % bs != 0 or N % bs != 0:
+            print(f"    - WARNING: Dimensions ({M}, {N}) not divisible by block_size={bs}. Falling back to row-wise.")
+            return self._convert_fp8_rowwise(W_float32)
+        
+        print(f"    - Using 2D block-wise FP8 scaling with block size {bs}.")
+        
+        # Reshape to 2D blocks
+        W_blocked = W_float32.reshape(M // bs, bs, N // bs, bs).permute(0, 2, 1, 3)  # (M//bs, N//bs, bs, bs)
+        block_max = W_blocked.abs().amax(dim=(2, 3))  # (M//bs, N//bs)
+        quant_scale = self.f8_max_val / block_max.clamp_min_(1e-12)  # (M//bs, N//bs)
+        
+        if self.no_learned_rounding:
+            print(f"    - Simple quantization (no learned rounding).")
+            with torch.no_grad():
+                # Apply scale per-block
+                scale_broadcast = quant_scale.unsqueeze(-1).unsqueeze(-1)  # (M//bs, N//bs, 1, 1)
+                W_scaled_blocked = W_blocked * scale_broadcast
+                W_scaled_blocked = W_scaled_blocked.clamp(-self.f8_max_val, self.f8_max_val)
+                W_f8_blocked = W_scaled_blocked.to(TARGET_FP8_DTYPE)
+                W_f8 = W_f8_blocked.permute(0, 2, 1, 3).reshape(M, N)
+                
+                # Dequant scale is reciprocal
+                dequant_scale = 1.0 / quant_scale  # (M//bs, N//bs)
+                
+                # Dequantize for bias correction
+                dequant_broadcast = dequant_scale.unsqueeze(-1).unsqueeze(-1)
+                dequantized_blocked = W_f8_blocked.to(COMPUTE_DTYPE) * dequant_broadcast
+                dequantized = dequantized_blocked.permute(0, 2, 1, 3).reshape(M, N)
+            
+            del W_float32, W_blocked
+            gc.collect()
+            if self.device == 'cuda':
+                torch.cuda.empty_cache()
+            
+            return W_f8, dequant_scale.to(device=self.device, dtype=SCALE_DTYPE), dequantized
+        
+        # With learned rounding - expand scale to full tensor for optimization
+        scale_broadcast = quant_scale.unsqueeze(-1).unsqueeze(-1)  # (M//bs, N//bs, 1, 1)
+        scale_full_blocked = scale_broadcast.expand(-1, -1, bs, bs)
+        scale_full = scale_full_blocked.permute(0, 2, 1, 3).reshape(M, N)
+        
+        max_rank = min(W_float32.shape)
+        k = min(self.max_k, max(self.min_k, int(math.floor(self.top_p * max_rank))))
+        k = min(k, max_rank)
+        
+        print(f"    - Tensor shape: {list(W_float32.shape)}, Max rank: {max_rank}. Using k={k} components.")
+        
+        if self.full_matrix:
+            print(f"Using torch.linalg.svd with full_matrices=True")
+            U, _, Vh = torch.linalg.svd(W_float32, full_matrices=True, driver='gesvd')
+        else:
+            try:
+                print(f"Trying svd_lowrank")
+                U, _, Vh = torch.svd_lowrank(W_float32, q=min(k + 10, max_rank), niter=4)
+                Vh = Vh.T
+            except RuntimeError:
+                print("    - svd_lowrank failed, falling back to full SVD.")
+                U, _, Vh = torch.linalg.svd(W_float32, full_matrices=False)
+        
+        U_k, Vh_k = U[:, :k], Vh[:k, :]
+        
+        # Use the optimizer with the expanded scale
+        if self.optimizer_choice == 'ppsf':
+            final_tensor_scaled = self._optimize_ppsf(W_float32, scale_full, U_k, Vh_k)
+        elif self.optimizer_choice == 'adamw':
+            final_tensor_scaled = self._optimize_adamw(W_float32, scale_full, U_k, Vh_k)
+        elif self.optimizer_choice == 'radam':
+            final_tensor_scaled = self._optimize_radam(W_float32, scale_full, U_k, Vh_k)
+        elif self.optimizer_choice == 'original':
+            final_tensor_scaled = self._optimize_original(W_float32, scale_full, U_k, Vh_k)
+        else:
+            raise ValueError(f"Unknown optimizer: '{self.optimizer_choice}'")
+        
+        final_tensor_scaled.clamp_(-self.f8_max_val, self.f8_max_val)
+        
+        with torch.no_grad():
+            W_f8 = final_tensor_scaled.to(TARGET_FP8_DTYPE)
+            dequant_scale = 1.0 / quant_scale  # (M//bs, N//bs)
+            dequant_scale = dequant_scale.to(device=self.device, dtype=SCALE_DTYPE)
+            dequantized = W_f8.to(COMPUTE_DTYPE) / scale_full
+        
+        del W_float32, W_blocked, scale_full, scale_broadcast, U, Vh, U_k, Vh_k, final_tensor_scaled, quant_scale
+        gc.collect()
+        if self.device == 'cuda':
+            torch.cuda.empty_cache()
+        
+        return W_f8, dequant_scale, dequantized
+
 # --- Main script execution functions ---
 
 def convert_to_fp8_scaled(
@@ -1313,15 +1517,31 @@ def convert_to_fp8_scaled(
                 # Add input_scale placeholder for INT8 (required by ComfyUI)
                 new_tensors[f"{base_name}.input_scale"] = torch.tensor([1.0], dtype=SCALE_DTYPE, device='cpu')
             else:
+                # FP8 format - determine format based on scaling_mode
                 new_tensors[f"{base_name}.weight_scale"] = dequant_s.to(device='cpu', dtype=SCALE_DTYPE).detach().clone()
+                
+                # Select FP8 format type based on scaling mode
+                if converter.scaling_mode == 'row':
+                    fp8_format = "float8_e4m3fn_rowwise"
+                    fp8_block_size = None
+                elif converter.scaling_mode == 'block2d':
+                    fp8_format = "float8_e4m3fn_blockwise"
+                    fp8_block_size = layer_block_size
+                else:
+                    # 'tensor' or 'block' (original per-row-group) use base format
+                    fp8_format = "float8_e4m3fn"
+                    fp8_block_size = None
+                
                 comfy_quant_tensor = create_comfy_quant_tensor(
-                    "float8_e4m3fn",
+                    fp8_format,
+                    block_size=fp8_block_size,
                     full_precision_matrix_mult=full_precision_matrix_mult if full_precision_matrix_mult else None
                 )
                 # Optionally add input_scale for FP8 (uses weight_scale as reasonable default)
                 if include_input_scale:
                     new_tensors[f"{base_name}.input_scale"] = dequant_s.to(device='cpu', dtype=SCALE_DTYPE).detach().clone()
             new_tensors[f"{base_name}.comfy_quant"] = comfy_quant_tensor.to(device='cpu')
+
         else:
             new_tensors[f"{base_name}.scale_weight"] = dequant_s.to(device='cpu', dtype=SCALE_DTYPE).detach().clone()
 
@@ -1451,7 +1671,9 @@ def main():
     parser.add_argument("--zimage", action='store_true', help="Exclude known Z-Image layers.")
     parser.add_argument("--zimage_refiner", action='store_true', help="Exclude known Z-Image refiner layers (context_refiner, noise_refiner).")
     parser.add_argument("--full_matrix", action='store_true', help="If should use torch.linalg.svd with full matices instead of the torch.svd_lowrank.")
-    parser.add_argument("--scaling_mode", type=str, default="tensor", choices=["tensor", "block"], help="Quantization scaling mode.")
+    parser.add_argument("--scaling_mode", type=str, default="tensor", choices=["tensor", "row", "block", "block2d"],
+                        help="FP8 scaling mode: 'tensor' (1 global scale), 'row' (per-row scale), 'block' (per-row-group), 'block2d' (2D tiles like INT8).")
+
     parser.add_argument("--block_size", type=int, default=None, help="Block size for block-wise quantization (REQUIRED for INT8, NF4, FP4). Common values: 64, 128.")
     parser.add_argument("--calib_samples", type=int, default=6144, help="Number of random samples for bias correction.")
     parser.add_argument("--manual_seed", type=int, default=-1, help="Set a manual seed for reproducibility. Use -1 for random.")
