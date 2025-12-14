@@ -1,5 +1,42 @@
 # Development Log
 
+## 2025-12-14: FP8 Row-wise & Block-wise Layouts + ComfyUI Fork Sync
+
+### Session Summary
+Implemented two new FP8 scaling modes in `convert_to_quant` and fully synced `quant_ops.py` to ComfyUI fork (`support_additional_fp8` branch).
+
+---
+
+### New FP8 Scaling Modes
+
+| Scaling Mode | Scale Shape | CLI Flag | ComfyUI Format |
+|-------------|-------------|----------|----------------|
+| Row-wise | `(M,)` | `--scaling_mode row` | `float8_e4m3fn_rowwise` |
+| 2D Block-wise | `(M//bs, N//bs)` | `--scaling_mode block2d` | `float8_e4m3fn_blockwise` |
+
+### ComfyUI Fork Sync
+
+Branch: `support_additional_fp8` (from `support_bnb_quant`)
+
+**File: `ComfyUI_temp/comfy/quant_ops.py`**
+- Added Triton INT8 and NF4/FP4 kernel imports
+- Added `RowWiseFP8Layout` class
+- Added `BlockWiseFP8Layout` class
+- Added `BlockWiseINT8Layout` and `BlockWiseINT8LayoutLodeWise` classes
+- Added `NF4Layout` and `FP4Layout` classes
+- Updated `QUANT_ALGOS` with all format entries
+- Updated `LAYOUTS` registry
+- Added all operation handlers (linear, mm, addmm, view, t, gelu, add_, transpose)
+
+### Upstream vs Fork Metadata Handling
+
+| Feature | Upstream | Fork (support_bnb_quant) |
+|---------|----------|--------------------------|
+| `params.group_size` | Ignored | Read for per-layer override |
+| Block size source | `QUANT_ALGOS` only | `layer_conf.params` → `QUANT_ALGOS` fallback |
+
+---
+
 ## 2025-12-12: Custom Layer Quantization with Regex Filtering
 
 ### Session Summary
