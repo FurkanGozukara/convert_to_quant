@@ -1129,18 +1129,18 @@ class LearnedRoundingConverter:
             pbar.set_postfix({"loss": f"{current_loss:.3e}", "best": f"{best_loss:.3e}", "lr": f"{curr_lr:.2e}", "worse_count": f"{worse_loss_counter}"})
         
             # Early stopping conditions
-            if current_loss < 1e-8 or curr_lr < 1e-08 or worse_loss_counter > 500:
-                if curr_lr < 1.75e-08 and worse_loss_counter > 450:
+            if current_loss < 1e-8 or curr_lr < 1e-10 or worse_loss_counter > 2000:
+                if curr_lr < 1e-10 and worse_loss_counter > 1950:
                     print("      - Loss has stalled and learning rate has bottomed out. Stopping.")
-                elif current_loss < 1e-8 and curr_lr < 1.75e-8:
+                elif current_loss < 1e-8 and curr_lr < 1e-10:
                     print("      - Learning Rate has bottomed out and loss is negligible. Stopping.")
-                elif worse_loss_counter > 450 and current_loss > 2e-8:
+                elif worse_loss_counter > 1950 and current_loss > 1e-8:
                     print("      - Loss is negligible and loss has stalled. Stopping.")
                 elif current_loss < 1e-8:
                     print("      - Loss is negligible. Stopping.")
-                elif curr_lr < 1e-08:
+                elif curr_lr < 1e-10:
                     print("      - Learning Rate has bottomed out. Stopping.")
-                elif worse_loss_counter > 500:
+                elif worse_loss_counter > 2000:
                     print("      - Loss has stalled. Stopping.")
                 break
         
