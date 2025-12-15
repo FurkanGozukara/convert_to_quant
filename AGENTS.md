@@ -26,7 +26,7 @@
 | Kernels | `convert_to_quant/comfy/` (nf4, int8, fp8) |
 | Layout classes | `convert_to_quant/comfy/quant_ops.py` |
 
-**Supported formats**: FP8, INT8 (blockwise/lodewise), NF4, FP4
+**Supported formats**: FP8 (tensor/row/block), INT8 (blockwise/lodewise), NF4, FP4
 
 ---
 
@@ -79,10 +79,14 @@ if my_model and any(n in key for n in MODEL_AVOID_KEY_NAMES):
 
 ### ComfyUI Metadata Format
 ```python
+# Per-tensor .comfy_quant metadata (stored as JSON in safetensor)
 comfy_quant = {
-    "format": "float8_e4m3fn",  # or int8_blockwise, bnb_nf4, bnb_fp4
-    "params": {"group_size": 64},  # for block-based formats
+    "format": "float8_e4m3fn",  # or float8_e4m3fn_rowwise, float8_e4m3fn_blockwise,
+                                # int8_blockwise, int8_lodewise, bnb_nf4, bnb_fp4
+    "params": {"group_size": 64},  # Fork only: per-layer override (upstream ignores)
 }
+# Note: params.group_size is read by fork's support_bnb_quant branch.
+# Upstream uses QUANT_ALGOS defaults only.
 ```
 
 ---

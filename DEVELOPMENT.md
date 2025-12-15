@@ -1,5 +1,107 @@
 # Development Log
 
+## 2025-12-14: JSON Layer Config for Per-Layer Quantization
+
+Added `--layer-config PATH` and `--dry-run create-template`:
+- Specificity-based pattern matching (numbers+8chars → internal matches → prefix)
+- `*` wildcards (fnmatch)
+- Strict validation (error on unknown format)
+- **Template generation**: `--dry-run create-template` scans model and creates template JSON
+
+**Example:**
+```bash
+# Generate template
+convert_to_quant -i model.safetensors --dry-run create-template
+
+# Use template
+convert_to_quant -i model.safetensors --layer-config model_layer_config_template.json --comfy_quant
+```
+
+---
+
+## 2025-12-14: Custom Scaling Mode for Mixed Precision FP8
+
+Added `--custom-scaling-mode {tensor,row,block,block2d}` to override FP8 scaling mode for custom-type layers.
+
+---
+
+## 2025-12-14: FP8 Scaled to Comfy Quant Conversion Mode
+
+### Session Summary
+Added `--convert-fp8-scaled` mode for offline conversion of legacy `fp8_scaled` format to `comfy_quant` format.
+
+---
+
+### Problem
+ComfyUI's `utils.py::convert_old_quants()` incorrectly converts high-precision layers with dummy `.scale_weight` to FP8. This offline conversion tool does it correctly by detecting FP8 layers purely by **weight dtype** (`float8_e4m3fn`).
+
+### CLI Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--convert-fp8-scaled` | Enable conversion mode (no quantization, format only) |
+| `--hp-filter REGEX` | Validate matched layers are high-precision (error if FP8) |
+| `--full-precision-mm` | Set `full_precision_matrix_mult=True` in .comfy_quant metadata |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `convert_to_quant/convert_to_quant.py` | Added `convert_fp8_scaled_to_comfy_quant()` function and CLI args |
+
+### Usage
+
+```bash
+# Basic conversion
+convert_to_quant -i old_model.safetensors --convert-fp8-scaled -o new_model.safetensors
+
+# With high-precision validation
+convert_to_quant -i model.safetensors --convert-fp8-scaled --hp-filter=".*final_layer.*" -o out.safetensors
+
+# With full precision matrix mult flag
+convert_to_quant -i model.safetensors --convert-fp8-scaled --full-precision-mm -o out.safetensors
+```
+
+---
+
+## 2025-12-14: FP8 Row-wise & Block-wise Layouts + ComfyUI Fork Sync
+
+
+### Session Summary
+Implemented two new FP8 scaling modes in `convert_to_quant` and fully synced `quant_ops.py` to ComfyUI fork (`support_additional_fp8` branch).
+
+---
+
+### New FP8 Scaling Modes
+
+| Scaling Mode | Scale Shape | CLI Flag | ComfyUI Format |
+|-------------|-------------|----------|----------------|
+| Row-wise | `(M,)` | `--scaling_mode row` | `float8_e4m3fn_rowwise` |
+| 2D Block-wise | `(M//bs, N//bs)` | `--scaling_mode block2d` | `float8_e4m3fn_blockwise` |
+
+### ComfyUI Fork Sync
+
+Branch: `support_additional_fp8` (from `support_bnb_quant`)
+
+**File: `ComfyUI_temp/comfy/quant_ops.py`**
+- Added Triton INT8 and NF4/FP4 kernel imports
+- Added `RowWiseFP8Layout` class
+- Added `BlockWiseFP8Layout` class
+- Added `BlockWiseINT8Layout` and `BlockWiseINT8LayoutLodeWise` classes
+- Added `NF4Layout` and `FP4Layout` classes
+- Updated `QUANT_ALGOS` with all format entries
+- Updated `LAYOUTS` registry
+- Added all operation handlers (linear, mm, addmm, view, t, gelu, add_, transpose)
+
+### Upstream vs Fork Metadata Handling
+
+| Feature | Upstream | Fork (support_bnb_quant) |
+|---------|----------|--------------------------|
+| `params.group_size` | Ignored | Read for per-layer override |
+| Block size source | `QUANT_ALGOS` only | `layer_conf.params` → `QUANT_ALGOS` fallback |
+
+---
+
 ## 2025-12-12: Custom Layer Quantization with Regex Filtering
 
 ### Session Summary
