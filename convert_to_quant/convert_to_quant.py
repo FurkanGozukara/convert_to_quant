@@ -101,7 +101,7 @@ def pattern_specificity(pattern: str) -> tuple:
     Higher score = more specific pattern.
     
     Priority rules:
-    1. Tier 0 (highest): Pattern has explicit numbers (\d or literal digits) AND 8+ literal chars
+    1. Tier 0 (highest): Pattern has explicit numbers (``\\d`` or literal digits) AND 8+ literal chars
     2. Tier 1: Longer literal length
     
     Returns:
@@ -2311,7 +2311,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
                      'nerf_large', 'nerf_small', 'radiance', 'wan', 'qwen', 'hunyuan', 'zimage', 'zimage_refiner',
                      'calib_samples', 'manual_seed', 'int8', 'nf4', 'fp4', 'fallback', 'custom_layers', 'custom_type',
                      'custom_block_size', 'custom_scaling_mode', 'custom_simple', 'custom_heur', 'fallback_block_size', 'fallback_simple',
-                     'full_precision_matrix_mult', 'heur', 'input_scale', 'simple', 'layer_config']
+                     'full_precision_matrix_mult', 'heur', 'input_scale', 'simple', 'layer_config', 'layer_config_fullmatch']
     converter_kwargs = {k: v for k, v in vars(args).items() if k not in excluded_keys}
 
     # Load layer config if specified
