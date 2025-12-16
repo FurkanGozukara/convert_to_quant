@@ -2143,9 +2143,238 @@ def convert_fp8_scaled_to_comfy_quant(
         print(f"FATAL: Error saving file '{output_file}': {e}")
         return
 
+
+# --- CLI Help Sections ---
+# Arguments categorized for multi-section help output
+
+EXPERIMENTAL_ARGS = {
+    'int8', 'nf4', 'fp4', 'fallback',
+    'custom_layers', 'custom_type', 'custom_block_size', 'custom_scaling_mode',
+    'custom_simple', 'custom_heur',
+    'fallback_block_size', 'fallback_simple',
+    'kernel_backend', 'heur', 'scaling_mode', 'block_size'
+}
+
+FILTER_ARGS = {
+    't5xxl', 'mistral', 'distillation_large', 'distillation_small',
+    'nerf_large', 'nerf_small', 'radiance', 'wan', 'qwen',
+    'hunyuan', 'zimage', 'zimage_refiner'
+}
+
+
+class MultiHelpArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser with multiple help sections for experimental and filter args."""
+    
+    def __init__(self, *args, experimental_args=None, filter_args=None, **kwargs):
+        self._experimental_args = experimental_args or set()
+        self._filter_args = filter_args or set()
+        self._all_actions = []  # Track all actions for section-specific help
+        super().__init__(*args, **kwargs)
+    
+    def add_argument(self, *args, **kwargs):
+        action = super().add_argument(*args, **kwargs)
+        if hasattr(self, '_all_actions'):
+            self._all_actions.append(action)
+        return action
+    
+    def parse_args(self, args=None, namespace=None):
+        if args is None:
+            args = sys.argv[1:]
+        
+        # Check for special help flags before parsing
+        if '--help-experimental' in args or '-he' in args:
+            self._print_experimental_help()
+            sys.exit(0)
+        elif '--help-filters' in args or '-hf' in args:
+            self._print_filters_help()
+            sys.exit(0)
+        
+        return super().parse_args(args, namespace)
+    
+    def _get_dest_name(self, action):
+        """Get the destination name for an action."""
+        return action.dest
+    
+    def _format_action_help(self, action):
+        """Format a single action for help output."""
+        # Get option strings
+        opts = ', '.join(action.option_strings) if action.option_strings else action.dest
+        
+        # Get help text
+        help_text = action.help or ''
+        if help_text == argparse.SUPPRESS:
+            return None
+        
+        # Format default if present and not suppressed
+        if action.default is not None and action.default != argparse.SUPPRESS:
+            if action.default is not False and action.default != '':
+                if isinstance(action.default, str):
+                    help_text += f" (default: '{action.default}')"
+                else:
+                    help_text += f" (default: {action.default})"
+        
+        # Format choices if present
+        if action.choices:
+            choices_str = ', '.join(str(c) for c in action.choices)
+            help_text += f" [choices: {choices_str}]"
+        
+        return f"  {opts:30s} {help_text}"
+    
+    def _print_experimental_help(self):
+        """Print help for experimental features."""
+        print("Experimental Quantization Features")
+        print("=" * 60)
+        print()
+        print("These are advanced/experimental options for non-default quantization")
+        print("formats and fine-grained control. Use --help for standard options.")
+        print()
+        print("Alternative Quantization Formats:")
+        print("-" * 40)
+        
+        format_args = ['int8', 'nf4', 'fp4', 'fallback', 'block_size', 'scaling_mode', 'kernel_backend']
+        for action in self._all_actions:
+            if self._get_dest_name(action) in format_args:
+                line = self._format_action_help(action)
+                if line:
+                    print(line)
+        
+        print()
+        print("Custom Layer Quantization:")
+        print("-" * 40)
+        
+        custom_args = ['custom_layers', 'custom_type', 'custom_block_size', 
+                       'custom_scaling_mode', 'custom_simple', 'custom_heur']
+        for action in self._all_actions:
+            if self._get_dest_name(action) in custom_args:
+                line = self._format_action_help(action)
+                if line:
+                    print(line)
+        
+        print()
+        print("Fallback Layer Options:")
+        print("-" * 40)
+        
+        fallback_args = ['fallback_block_size', 'fallback_simple']
+        for action in self._all_actions:
+            if self._get_dest_name(action) in fallback_args:
+                line = self._format_action_help(action)
+                if line:
+                    print(line)
+        
+        print()
+        print("Performance Tuning:")
+        print("-" * 40)
+        
+        perf_args = ['heur']
+        for action in self._all_actions:
+            if self._get_dest_name(action) in perf_args:
+                line = self._format_action_help(action)
+                if line:
+                    print(line)
+        
+        print()
+    
+    def _print_filters_help(self):
+        """Print help for model-specific filter presets."""
+        print("Model-Specific Exclusion Filters")
+        print("=" * 60)
+        print()
+        print("These flags keep certain model-specific layers in high precision")
+        print("(not quantized). Multiple filters can be combined.")
+        print()
+        print("Text Encoders:")
+        print("-" * 40)
+        
+        text_args = ['t5xxl', 'mistral']
+        for action in self._all_actions:
+            if self._get_dest_name(action) in text_args:
+                line = self._format_action_help(action)
+                if line:
+                    print(line)
+        
+        print()
+        print("Diffusion Models (Flux-style):")
+        print("-" * 40)
+        
+        diffusion_args = ['distillation_large', 'distillation_small', 'nerf_large', 'nerf_small', 'radiance']
+        for action in self._all_actions:
+            if self._get_dest_name(action) in diffusion_args:
+                line = self._format_action_help(action)
+                if line:
+                    print(line)
+        
+        print()
+        print("Video Models:")
+        print("-" * 40)
+        
+        video_args = ['wan', 'hunyuan']
+        for action in self._all_actions:
+            if self._get_dest_name(action) in video_args:
+                line = self._format_action_help(action)
+                if line:
+                    print(line)
+        
+        print()
+        print("Image Models:")
+        print("-" * 40)
+        
+        image_args = ['qwen', 'zimage', 'zimage_refiner']
+        for action in self._all_actions:
+            if self._get_dest_name(action) in image_args:
+                line = self._format_action_help(action)
+                if line:
+                    print(line)
+        
+        print()
+    
+    def format_help(self):
+        """Override to add section hints and hide experimental/filter args."""
+        # Build custom help output
+        formatter = self._get_formatter()
+        
+        # Add standard arguments only (filter out experimental and filter args)
+        standard_actions = []
+        for action in self._actions:
+            dest = self._get_dest_name(action)
+            if dest not in self._experimental_args and dest not in self._filter_args:
+                standard_actions.append(action)
+        
+        # Add usage with only standard actions
+        formatter.add_usage(self.usage, standard_actions, self._mutually_exclusive_groups)
+        
+        # Add description
+        formatter.add_text(self.description)
+        
+        # Group standard actions
+        formatter.start_section('Standard Options')
+        formatter.add_arguments(standard_actions)
+        formatter.end_section()
+        
+        # Add section hints
+        formatter.add_text('')
+        formatter.add_text('Additional Help Sections:')
+        formatter.add_text('  --help-experimental, -he    Show experimental quantization options')
+        formatter.add_text('                              (int8, nf4, fp4, custom-layers, scaling_mode, etc.)')
+        formatter.add_text('  --help-filters, -hf         Show model-specific exclusion filters')
+        formatter.add_text('                              (t5xxl, hunyuan, wan, qwen, etc.)')
+        
+        # Add epilog
+        formatter.add_text(self.epilog)
+        
+        return formatter.format_help()
+
+
 def main():
 
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter, description=f"Convert safetensors weights to Scaled FP8 or INT8 format.")
+    parser = MultiHelpArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Convert safetensors weights to Scaled FP8 format.\n\n"
+                    "Default behavior: FP8 quantization with per-tensor scaling.\n"
+                    "For INT8/NF4/FP4 and other experimental options, see --help-experimental.\n"
+                    "For model-specific layer exclusions, see --help-filters.",
+        experimental_args=EXPERIMENTAL_ARGS,
+        filter_args=FILTER_ARGS
+    )
     parser.add_argument("-i", "--input", type=str, required=True, help="Input safetensors file path.")
     parser.add_argument("-o", "--output", type=str, help="Output safetensors file path. Auto-generated if not provided.")
     parser.add_argument("--comfy_quant", action='store_true', help="Use Comfy quantization method.")
@@ -2260,7 +2489,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
     if args.convert_fp8_scaled:
         if not args.output:
             base = os.path.splitext(args.input)[0]
-            args.output = f"{base}_comfy_quant.safetensors"
+            args.output = f"{base}_fp8mixed.safetensors"
         
         if not os.path.exists(args.input):
             print(f"Error: Input file not found: {args.input}")

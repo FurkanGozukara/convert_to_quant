@@ -1,5 +1,57 @@
 # Development Log
 
+## 2025-12-16: CLI Help Restructuring
+
+### Session Summary
+Reorganized `--help` output to reduce bloat by splitting arguments into three sections.
+
+---
+
+### New Help Sections
+
+| Command | Description |
+|---------|-------------|
+| `--help` | Standard FP8 workflow options only |
+| `--help-experimental` or `-he` | Experimental quantization options (INT8, NF4, FP4, custom layers, etc.) |
+| `--help-filters` or `-hf` | Model-specific exclusion presets (t5xxl, hunyuan, wan, etc.) |
+
+### Experimental Arguments (16)
+Moved to `--help-experimental`:
+- Format: `--int8`, `--nf4`, `--fp4`, `--fallback`
+- Scaling: `--scaling_mode`, `--block_size`, `--kernel_backend`
+- Custom layers: `--custom-layers`, `--custom-type`, `--custom-block-size`, `--custom-scaling-mode`, `--custom-simple`, `--custom-heur`
+- Fallback: `--fallback-block-size`, `--fallback-simple`
+- Performance: `--heur`
+
+### Filter Arguments (12)
+Moved to `--help-filters`:
+- Text encoders: `--t5xxl`, `--mistral`
+- Diffusion: `--distillation_large`, `--distillation_small`, `--nerf_large`, `--nerf_small`, `--radiance`
+- Video: `--wan`, `--hunyuan`
+- Image: `--qwen`, `--zimage`, `--zimage_refiner`
+
+### Implementation
+
+Added `MultiHelpArgumentParser` class that:
+1. Intercepts `--help-experimental` and `--help-filters` before standard parsing
+2. Filters experimental/filter args from main `--help` usage line and options list
+3. Provides organized section-specific help output
+
+### Usage
+
+```bash
+# Standard help (compact)
+convert_to_quant --help
+
+# Experimental options (INT8, NF4, scaling modes, etc.)
+convert_to_quant --help-experimental
+
+# Model-specific filters
+convert_to_quant --help-filters
+```
+
+---
+
 ## 2025-12-15: INT8 Optimizer LR Schedule Parity
 
 ### Session Summary
