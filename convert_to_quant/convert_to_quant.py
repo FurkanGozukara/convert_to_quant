@@ -399,7 +399,7 @@ class LearnedRoundingConverter:
     Provides a highly effective optimization strategy.
     Supports both FP8 and INT8 quantization formats.
     """
-    def __init__(self, optimizer="original", num_iter=500, top_p=0.01, min_k=1, max_k=16, scaling_mode='tensor', block_size=64, full_matrix=False, target_format='fp8', no_learned_rounding=False, kernel_backend='triton', lr_schedule='adaptive', lr_gamma=0.99, lr_patience=50, lr_factor=0.5, lr_min=1e-8, lr_cooldown=0, lr_threshold=0.0, lr_adaptive_mode='simple-reset', lr_shape_influence=1.0, lr_threshold_mode='rel', lr_eps=1e-8, early_stop_loss=1e-8, early_stop_lr=1e-10, early_stop_stall=1000, **kwargs):
+    def __init__(self, optimizer="original", num_iter=500, top_p=0.01, min_k=1, max_k=16, scaling_mode='tensor', block_size=64, full_matrix=False, target_format='fp8', no_learned_rounding=False, kernel_backend='triton', lr_schedule='adaptive', lr_gamma=0.99, lr_patience=50, lr_factor=0.5, lr_min=1e-8, lr_cooldown=0, lr_threshold=0.0, lr_adaptive_mode='simple-reset', lr_shape_influence=1.0, lr_threshold_mode='rel', early_stop_loss=1e-8, early_stop_lr=1e-10, early_stop_stall=1000, **kwargs):
         self.num_iter = num_iter
         self.top_p = top_p
         self.min_k = min_k
@@ -426,7 +426,6 @@ class LearnedRoundingConverter:
         # Shape-adaptive LR (for plateau schedule)
         self.lr_shape_influence = lr_shape_influence
         self.lr_threshold_mode = lr_threshold_mode  # 'rel' or 'abs'
-        self.lr_eps = lr_eps  # Minimum LR change to apply
 
         # Early stopping thresholds
         self.early_stop_loss = early_stop_loss
@@ -664,11 +663,8 @@ class LearnedRoundingConverter:
                     cooldown_counter -= 1
                 elif plateau_counter >= effective_patience:
                     if curr_lr > self.lr_min:
-                        new_lr = max(curr_lr * effective_factor, self.lr_min)
-                        # Only apply if change is significant (eps check)
-                        if curr_lr - new_lr > self.lr_eps:
-                            curr_lr = new_lr
-                            cooldown_counter = effective_cooldown
+                        curr_lr = max(curr_lr * effective_factor, self.lr_min)
+                        cooldown_counter = effective_cooldown
                     plateau_counter = 0
             else:  # 'adaptive' - tier-based schedule
                 # For no-reset mode, use counter value before reset for tier calculation
@@ -1158,11 +1154,8 @@ class LearnedRoundingConverter:
                     cooldown_counter -= 1
                 elif plateau_counter >= effective_patience:
                     if curr_lr > self.lr_min:
-                        new_lr = max(curr_lr * effective_factor, self.lr_min)
-                        # Only apply if change is significant (eps check)
-                        if curr_lr - new_lr > self.lr_eps:
-                            curr_lr = new_lr
-                            cooldown_counter = effective_cooldown
+                        curr_lr = max(curr_lr * effective_factor, self.lr_min)
+                        cooldown_counter = effective_cooldown
                     plateau_counter = 0
             else:  # 'adaptive' - tier-based schedule
                 # For no-reset mode, use counter value before reset for tier calculation
@@ -2241,7 +2234,7 @@ FILTER_ARGS = {
 }
 
 ADVANCED_ARGS = {
-    'lr_shape_influence', 'lr_threshold_mode', 'lr_eps',
+    'lr_shape_influence', 'lr_threshold_mode',
     'early_stop_loss', 'early_stop_lr', 'early_stop_stall'
 }
 
@@ -2426,7 +2419,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         print("Shape-Adaptive LR (Plateau Schedule):")
         print("-" * 40)
 
-        shape_args = ['lr_shape_influence', 'lr_threshold_mode', 'lr_eps']
+        shape_args = ['lr_shape_influence', 'lr_threshold_mode']
         for action in self._all_actions:
             if self._get_dest_name(action) in shape_args:
                 line = self._format_action_help(action)
@@ -2569,8 +2562,6 @@ def main():
                         help="[plateau] Scale factor based on tensor aspect ratio. 0.0=disabled, 1.0=full effect. Elongated tensors get more aggressive decay. (default: 1.0)")
     parser.add_argument("--lr-threshold-mode", type=str, default="rel", choices=["rel", "abs"], dest="lr_threshold_mode",
                         help="[plateau] How to interpret --lr_threshold: 'rel' (relative to best loss) or 'abs' (absolute). (default: rel)")
-    parser.add_argument("--lr-eps", type=float, default=1e-8, dest="lr_eps",
-                        help="[plateau] Minimum LR change to apply; smaller changes are ignored. (default: 1e-8)")
     # Early stopping thresholds (--help-advanced)
     parser.add_argument("--early-stop-loss", type=float, default=1e-8, dest="early_stop_loss",
                         help="Early stop when loss drops below this value. (default: 1e-8)")
