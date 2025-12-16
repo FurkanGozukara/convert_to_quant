@@ -67,20 +67,17 @@ pip install -U "triton-windows<3.3"
 ## Quick Start
 
 ```bash
-# Basic FP8 quantization (default)
+# Basic FP8 quantization
+convert_to_quant -i model.safetensors
+
+# FP8 with ComfyUI metadata (recommended)
 convert_to_quant -i model.safetensors --comfy_quant
 
-# INT8 with performance heuristics
-convert_to_quant -i model.safetensors --int8 --comfy_quant --heur
+# With custom learning rate (adaptive schedule by default)
+convert_to_quant -i model.safetensors --comfy_quant --lr 0.01
 
-# NF4 4-bit quantization
-convert_to_quant -i model.safetensors --nf4 --comfy_quant
-
-# T5-XXL text encoder
-convert_to_quant -i t5xxl.safetensors --t5xxl --comfy_quant
-
-# High quality (more iterations)
-convert_to_quant -i model.safetensors --comfy_quant --num_iter 2000
+# With plateau LR schedule for better convergence
+convert_to_quant -i model.safetensors --comfy_quant --lr_schedule plateau --lr_patience 9 --lr_factor 0.92
 ```
 
 Load the output `.safetensors` file in ComfyUI like any other model.
