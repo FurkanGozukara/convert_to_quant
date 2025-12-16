@@ -20,11 +20,11 @@ Visit [pytorch.org](https://pytorch.org/get-started/locally/) to get the correct
 **Examples:**
 
 ```bash
-# CUDA 12.1 (most common)
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+# CUDA 13.0 (newest)
+pip install torch --index-url https://download.pytorch.org/whl/cu130
 
-# CUDA 12.4
-pip install torch --index-url https://download.pytorch.org/whl/cu124
+# CUDA 12.8 (stable)
+pip install torch --index-url https://download.pytorch.org/whl/cu128
 
 # CUDA 11.8 (older GPUs)
 pip install torch --index-url https://download.pytorch.org/whl/cu118
