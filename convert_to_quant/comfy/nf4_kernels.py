@@ -55,6 +55,28 @@ FP4_CODEBOOK = torch.tensor([
 # Normalize FP4 codebook to [-1, 1] range like NF4
 FP4_CODEBOOK_NORMALIZED = FP4_CODEBOOK / FP4_CODEBOOK.abs().max()
 
+# AF4 codebook: AbnormalFloat4 from "NF4 Isn't Information Theoretically Optimal"
+# https://arxiv.org/abs/2306.06965
+# Note: Optimized for blocksize=64, may not work well with other block sizes
+AF4_CODEBOOK = torch.tensor([
+    1.0,
+    0.72424863,
+    0.55496234,
+    0.42563882,
+    0.31675666,
+    0.21961274,
+    0.12934483,
+    0.04273164,
+    0.0,
+    -0.04934812,
+    -0.14982478,
+    -0.25607552,
+    -0.3736951,
+    -0.51243739,
+    -0.69441008,
+    -1.0,
+], dtype=torch.float32)
+
 
 class QuantState4bit(NamedTuple):
     """Container for 4-bit quantization state."""
@@ -134,6 +156,8 @@ def _get_codebook(quant_type: str, device: torch.device) -> torch.Tensor:
         return NF4_CODEBOOK.to(device)
     elif quant_type == "fp4":
         return FP4_CODEBOOK_NORMALIZED.to(device)
+    elif quant_type == "af4":
+        return AF4_CODEBOOK.to(device)
     else:
         raise ValueError(f"Unknown quant_type: {quant_type}")
 
@@ -224,7 +248,8 @@ def quantize_4bit(
     tensor: torch.Tensor,
     block_size: int = 64,
     quant_type: str = "nf4",
-    compress_statistics: bool = False
+    compress_statistics: bool = False,
+    custom_absmax: Optional[torch.Tensor] = None
 ) -> Tuple[torch.Tensor, QuantState4bit]:
     """
     Quantize tensor to 4-bit using NF4 or FP4 codebook.
@@ -232,15 +257,17 @@ def quantize_4bit(
     Args:
         tensor: Input tensor (any shape, but numel must be divisible by block_size)
         block_size: Size of quantization blocks (default 64)
-        quant_type: "nf4" or "fp4"
+        quant_type: "nf4", "fp4", or "af4"
         compress_statistics: If True, also quantize the absmax values (double quant)
+        custom_absmax: Optional pre-computed absmax values. If provided, uses these
+                       instead of computing from tensor. Shape must be (n_blocks,).
         
     Returns:
         Tuple of (packed_data, quant_state)
         - packed_data: uint8 tensor with 2 values per byte
         - quant_state: QuantState4bit with all info needed for dequantization
     """
-    assert quant_type in ("nf4", "fp4"), f"quant_type must be 'nf4' or 'fp4', got {quant_type}"
+    assert quant_type in ("nf4", "fp4", "af4"), f"quant_type must be 'nf4', 'fp4', or 'af4', got {quant_type}"
     
     original_shape = tensor.shape
     original_dtype = tensor.dtype
@@ -263,8 +290,14 @@ def quantize_4bit(
     n_blocks = padded_numel // block_size
     tensor_blocked = tensor_flat.reshape(n_blocks, block_size)
     
-    # Compute per-block absmax
-    absmax = tensor_blocked.abs().max(dim=1)[0]  # Shape: (n_blocks,)
+    # Use custom absmax if provided, otherwise compute from tensor
+    if custom_absmax is not None:
+        assert custom_absmax.shape[0] == n_blocks, \
+            f"custom_absmax shape {custom_absmax.shape} doesn't match n_blocks {n_blocks}"
+        absmax = custom_absmax.to(device=device, dtype=torch.float32)
+    else:
+        # Compute per-block absmax
+        absmax = tensor_blocked.abs().max(dim=1)[0]  # Shape: (n_blocks,)
     
     # Get codebook
     codebook = _get_codebook(quant_type, device)
@@ -404,6 +437,31 @@ def dequantize_fp4(
     output_dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
     """Dequantize FP4 packed data."""
+    return dequantize_4bit(packed, quant_state, output_dtype)
+
+
+def quantize_af4(
+    tensor: torch.Tensor,
+    block_size: int = 64,
+    compress_statistics: bool = False
+) -> Tuple[torch.Tensor, QuantState4bit]:
+    """Quantize tensor using AF4 (AbnormalFloat4) format.
+    
+    Note: AF4 is optimized for block_size=64. Other sizes may have suboptimal quality.
+    Reference: https://arxiv.org/abs/2306.06965
+    """
+    if block_size != 64:
+        import warnings
+        warnings.warn(f"AF4 is optimized for block_size=64, got {block_size}. Quality may be degraded.")
+    return quantize_4bit(tensor, block_size, "af4", compress_statistics)
+
+
+def dequantize_af4(
+    packed: torch.Tensor,
+    quant_state: QuantState4bit,
+    output_dtype: Optional[torch.dtype] = None
+) -> torch.Tensor:
+    """Dequantize AF4 packed data."""
     return dequantize_4bit(packed, quant_state, output_dtype)
 
 

@@ -1,5 +1,167 @@
 # Development Log
 
+## 2025-12-18: Scale Shape Format Detection in Conversion Functions
+
+### Session Summary
+Added automatic format and block_size detection from scale tensor shape in `convert_fp8_scaled_to_comfy_quant()` and `convert_int8_to_comfy_quant()`.
+
+---
+
+### Changes
+
+**FP8 Conversion** (`convert_fp8_scaled_to_comfy_quant`):
+| Scale Shape | Detected Format |
+|-------------|-----------------|
+| `()` or `(1,)` | `float8_e4m3fn` |
+| `(M,)` | `float8_e4m3fn_rowwise` |
+| `(M//bs, N//bs)` | `float8_e4m3fn_blockwise` + inferred block_size |
+| `(M, N//bs, 1)` | `float8_e4m3fn_block3d` + inferred block_size |
+
+**INT8 Conversion** (`convert_int8_to_comfy_quant`):
+| Scale Shape | Detected Format |
+|-------------|-----------------|
+| `(M//bs, N//bs)` | `int8_blockwise` + inferred block_size |
+| `(N, K//bs)` | `int8_lodewise` + inferred block_size |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `convert_to_quant/convert_to_quant.py` | Added format detection logic in both conversion functions, with diagnostic output |
+
+### Verification
+
+Tested on `Chroma-DC-2K-fp8_scaled_original_hybrid_rev2.safetensors`:
+- 231 `.comfy_quant` tensors created
+- All using flat structure (no `params` nesting)
+- Correctly detected `float8_e4m3fn` format from scale numel=1
+
+---
+
+## 2025-12-18: Fix ComfyQuant Layer Configuration Structure
+
+### Session Summary
+Fixed `create_comfy_quant_tensor()` to use correct flat structure - `group_size` is now at root level, not nested in `params`.
+
+---
+
+### The Bug
+Previous agent incorrectly nested `group_size` inside a `params` sub-object:
+```python
+# WRONG (was)
+{"format": "int8_blockwise", "params": {"group_size": 128}}
+
+# CORRECT (now)
+{"format": "int8_blockwise", "group_size": 128}
+```
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `convert_to_quant/convert_to_quant.py` | Simplified `create_comfy_quant_tensor()` - removed params nesting, cleaned up docstring |
+| `AGENTS.md` | Updated "ComfyUI Metadata Format" section to show correct flat structure |
+
+### Verification
+
+```python
+from convert_to_quant.convert_to_quant import create_comfy_quant_tensor, tensor_to_dict
+tensor = create_comfy_quant_tensor("int8_blockwise", block_size=128)
+result = tensor_to_dict(tensor)
+# Result: {'format': 'int8_blockwise', 'group_size': 128}
+# SUCCESS: No 'params' nesting
+```
+
+---
+
+## 2025-12-17: INT8 Legacy-to-ComfyQuant Format Converter
+
+### Session Summary
+Added `--convert-int8-scaled` mode to convert legacy INT8 quantized models (with `.scale_weight` keys) to the comfy_quant format (with `.weight_scale` keys and `.comfy_quant` metadata).
+
+---
+
+### New CLI Argument
+
+```bash
+# Basic conversion
+convert_to_quant -i model_int8.safetensors --convert-int8-scaled
+
+# With custom block size and kernel backend
+convert_to_quant -i model_int8.safetensors --convert-int8-scaled --block_size 128 --kernel_backend blockwise
+```
+
+### Key Transformations
+
+| Old Format | New Format |
+|------------|------------|
+| `.scale_weight` | `.weight_scale` |
+| `.scale_input` | `.input_scale` |
+| (none) | `.comfy_quant` metadata with `int8_blockwise` or `int8_lodewise` format |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `convert_to_quant/convert_to_quant.py` | Added `convert_int8_to_comfy_quant()` function, `--convert-int8-scaled` CLI arg |
+
+---
+
+## 2025-12-17: NF4/FP4/AF4 Learned Rounding Optimization
+
+### Session Summary
+Added SVD-based learned rounding optimization to 4-bit quantization formats with full LR schedule parity (adaptive/exponential/plateau).
+
+---
+
+### New Features
+
+| Feature | Description |
+|---------|-------------|
+| `--af4` | AF4 (AbnormalFloat4) codebook support, optimized for block_size=64 |
+| NF4/FP4/AF4 optimization | Absmax scale refinement via gradient descent |
+| Full LR schedules | `adaptive`, `exponential`, `plateau` with all parameters |
+
+### New CLI Argument
+
+```bash
+convert_to_quant -i model.safetensors --af4 --block_size 64 --comfy_quant
+```
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `convert_to_quant/comfy/nf4_kernels.py` | Added `AF4_CODEBOOK`, `quantize_af4`, `dequantize_af4`, updated `_get_codebook()` |
+| `convert_to_quant/convert_to_quant.py` | Added `_convert_af4`, `_optimize_nf4_learned_rounding`, `_optimize_nf4_original`; updated `_convert_nf4`/`_convert_fp4` to call optimizer; added af4 to CLI, formats, and routing |
+
+### Optimization Strategy
+
+For 4-bit codebook quantization, we optimize **absmax scales** (not indices):
+1. Compute SVD of weight matrix → project error onto top-k components
+2. Iteratively adjust absmax to minimize projected reconstruction error
+3. Re-quantize with optimized absmax
+
+This differs from FP8/INT8 where quantized values are directly adjusted.
+
+### Usage
+
+```bash
+# NF4 with optimization (default)
+convert_to_quant -i model.safetensors --nf4 --block_size 64 --comfy_quant -n 100
+
+# FP4 with plateau schedule
+convert_to_quant -i model.safetensors --fp4 --block_size 64 --comfy_quant -n 200 --lr_schedule plateau
+
+# AF4 (AbnormalFloat4) - optimized codebook for block_size=64
+convert_to_quant -i model.safetensors --af4 --block_size 64 --comfy_quant
+
+# Simple quantization (no optimization)
+convert_to_quant -i model.safetensors --nf4 --block_size 64 --comfy_quant --simple
+```
+
+---
+
 ## 2025-12-16: Shape-Adaptive Plateau Schedule & Early Stopping Controls
 
 ### Session Summary
