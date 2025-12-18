@@ -25,10 +25,27 @@ try:
         quantize_af4,
         dequantize_af4,
         QuantState4bit,
+        NF4_CODEBOOK,
+        FP4_CODEBOOK_NORMALIZED,
+        AF4_CODEBOOK,
     )
     _HAS_NF4 = True
 except ImportError:
     _HAS_NF4 = False
+
+
+def get_4bit_codebook(quant_type: str) -> torch.Tensor:
+    """Get the codebook tensor for a 4-bit quantization type."""
+    if not _HAS_NF4:
+        raise RuntimeError("4-bit kernels not available")
+    if quant_type == 'nf4':
+        return NF4_CODEBOOK.clone()
+    elif quant_type == 'fp4':
+        return FP4_CODEBOOK_NORMALIZED.clone()
+    elif quant_type == 'af4':
+        return AF4_CODEBOOK.clone()
+    raise ValueError(f"Unknown 4-bit quant_type: {quant_type}")
+
 
 # Lode-Wise INT8 kernels (alternative INT8 quantization backend with per-output-lane scale access)
 try:
@@ -318,7 +335,16 @@ def generate_config_template(input_file: str, output_path: str, block_size: int 
 
     return viable_count, skipped_count
 
-def create_comfy_quant_tensor(format_type: str, block_size: Optional[int] = None, full_precision_matrix_mult: Optional[bool] = None) -> torch.Tensor:
+def create_comfy_quant_tensor(
+    format_type: str,
+    block_size: Optional[int] = None,
+    full_precision_matrix_mult: Optional[bool] = None,
+    # 4-bit specific metadata
+    quant_type: Optional[str] = None,
+    original_dtype: Optional[str] = None,
+    original_shape: Optional[Tuple[int, ...]] = None,
+    quant_map: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
     """
     Create a .comfy_quant layer configuration tensor for ComfyUI.
 
@@ -328,11 +354,16 @@ def create_comfy_quant_tensor(format_type: str, block_size: Optional[int] = None
         block_size: Block/group size for quantization (for block-based formats)
         full_precision_matrix_mult: If True, adds "full_precision_matrix_mult": True.
                                     If False or None, this key is omitted.
+        quant_type: For 4-bit formats: "nf4", "fp4", or "af4"
+        original_dtype: For 4-bit formats: original tensor dtype string (e.g., "float16")
+        original_shape: For 4-bit formats: original tensor shape as tuple
+        quant_map: For 4-bit formats: 16-value codebook tensor
 
     Returns:
         torch.uint8 tensor containing JSON-encoded layer configuration
     """
     BLOCK_BASED_FORMATS = ("int8_blockwise", "int8_lodewise", "bnb_nf4", "bnb_fp4", "bnb_af4", "float8_e4m3fn_blockwise")
+    FOUR_BIT_FORMATS = ("bnb_nf4", "bnb_fp4", "bnb_af4")
 
     comfy_quant = {"format": format_type}
 
@@ -343,7 +374,20 @@ def create_comfy_quant_tensor(format_type: str, block_size: Optional[int] = None
     if full_precision_matrix_mult is True:
         comfy_quant["full_precision_matrix_mult"] = True
 
+    # Add 4-bit specific metadata
+    if format_type in FOUR_BIT_FORMATS:
+        if quant_type is not None:
+            comfy_quant["quant_type"] = quant_type
+        if original_dtype is not None:
+            comfy_quant["dtype"] = original_dtype
+        if original_shape is not None:
+            comfy_quant["shape"] = list(original_shape)
+        if quant_map is not None:
+            # Store codebook as list of floats for JSON serialization
+            comfy_quant["quant_map"] = quant_map.tolist()
+
     return dict_to_tensor(comfy_quant)
+
 
 
 def fix_comfy_quant_params_structure(comfy_quant_tensor: torch.Tensor) -> Tuple[torch.Tensor, bool]:
@@ -2278,7 +2322,11 @@ def convert_to_fp8_scaled(
                 comfy_quant_tensor = create_comfy_quant_tensor(
                     "bnb_nf4" if layer_format == 'nf4' else ("bnb_af4" if layer_format == 'af4' else "bnb_fp4"),
                     block_size=layer_block_size,
-                    full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None
+                    full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None,
+                    quant_type=layer_format,
+                    original_dtype=str(original_tensor.dtype).replace("torch.", ""),
+                    original_shape=tuple(original_tensor.shape),
+                    quant_map=get_4bit_codebook(layer_format),
                 )
                 # Add input_scale for 4-bit if requested
                 if include_input_scale:
@@ -2329,14 +2377,28 @@ def convert_to_fp8_scaled(
             new_tensors[f"{base_name}.comfy_quant"] = comfy_quant_tensor.to(device='cpu')
 
         else:
-            new_tensors[f"{base_name}.scale_weight"] = dequant_s.to(device='cpu', dtype=SCALE_DTYPE).detach().clone()
-            # Add scale_input for non-comfy mode: use dequant_s for t5xxl/mistral, ones for others
-            if include_input_scale or t5xxl or mistral:
-                if t5xxl or mistral:
-                    new_tensors[f"{base_name}.scale_input"] = dequant_s.to(device='cpu', dtype=SCALE_DTYPE).detach().clone()
-                else:
-                    # Shape matches scale_weight, filled with 1.0
-                    new_tensors[f"{base_name}.scale_input"] = torch.ones_like(dequant_s, dtype=SCALE_DTYPE, device='cpu')
+            # Non-comfy (legacy) path
+            if is_4bit:
+                # Bitsandbytes-compatible structure for 4-bit formats
+                new_tensors[f"{base_name}.absmax"] = dequant_s.to(device='cpu', dtype=SCALE_DTYPE).detach().clone()
+                new_tensors[f"{base_name}.quant_map"] = get_4bit_codebook(layer_format).to(device='cpu', dtype=SCALE_DTYPE)
+                quant_state_dict = {
+                    "quant_type": layer_format,
+                    "blocksize": converter.block_size,
+                    "dtype": str(original_tensor.dtype).replace("torch.", ""),
+                    "shape": list(original_tensor.shape),
+                }
+                new_tensors[f"{base_name}.quant_state.bitsandbytes__{layer_format}"] = dict_to_tensor(quant_state_dict)
+            else:
+                # FP8/INT8 legacy path
+                new_tensors[f"{base_name}.scale_weight"] = dequant_s.to(device='cpu', dtype=SCALE_DTYPE).detach().clone()
+                # Add scale_input for non-comfy mode: use dequant_s for t5xxl/mistral, ones for others
+                if include_input_scale or t5xxl or mistral:
+                    if t5xxl or mistral:
+                        new_tensors[f"{base_name}.scale_input"] = dequant_s.to(device='cpu', dtype=SCALE_DTYPE).detach().clone()
+                    else:
+                        # Shape matches scale_weight, filled with 1.0
+                        new_tensors[f"{base_name}.scale_input"] = torch.ones_like(dequant_s, dtype=SCALE_DTYPE, device='cpu')
 
         # Determine if this layer uses simple mode (skip bias correction to save memory)
         layer_uses_simple = custom_simple if use_custom else (fallback_simple if use_fallback else no_learned_rounding)

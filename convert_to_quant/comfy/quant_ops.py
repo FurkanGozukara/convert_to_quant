@@ -36,6 +36,7 @@ try:
         QuantState4bit,
         NF4_CODEBOOK,
         FP4_CODEBOOK_NORMALIZED,
+        AF4_CODEBOOK,
     )
     _HAS_NF4_KERNELS = True
 except ImportError:
@@ -1221,17 +1222,24 @@ QUANT_ALGOS = {
     },
     "bnb_nf4": {
         "storage_t": torch.uint8,
-        "parameters": {"absmax"},
+        "parameters": {"absmax", "quant_map"},  # quant_map optional (can regenerate from quant_type)
         "comfy_tensor_layout": "NF4Layout",
         "group_size": 64,  # Fallback if per-tensor metadata missing
     },
     "bnb_fp4": {
         "storage_t": torch.uint8,
-        "parameters": {"absmax"},
+        "parameters": {"absmax", "quant_map"},  # quant_map optional (can regenerate from quant_type)
         "comfy_tensor_layout": "FP4Layout",
         "group_size": 64,  # Fallback if per-tensor metadata missing
     },
+    "bnb_af4": {
+        "storage_t": torch.uint8,
+        "parameters": {"absmax", "quant_map"},  # quant_map optional (can regenerate from quant_type)
+        "comfy_tensor_layout": "NF4Layout",  # AF4 uses same layout as NF4, just different codebook
+        "group_size": 64,  # Fallback if per-tensor metadata missing
+    },
 }
+
 
 LAYOUTS = {
     "TensorCoreFP8Layout": TensorCoreFP8Layout,

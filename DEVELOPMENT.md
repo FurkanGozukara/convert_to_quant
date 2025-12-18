@@ -1,5 +1,43 @@
 # Development Log
 
+## 2025-12-18: Fix NF4/FP4/AF4 Layer Structure for Loader Detection
+
+### Session Summary
+Fixed 4-bit quantization output structure so loaders can automatically identify and dequantize NF4/FP4/AF4 weights.
+
+---
+
+### The Problem
+When using 4-bit formats without `--comfy_quant`, the script incorrectly wrote `.scale_weight` (FP8/INT8 convention). The comfy_quant path also lacked critical metadata (codebook, dtype, shape) needed for dequantization.
+
+### Changes
+
+**Comfy path (`--comfy_quant`)**: Extended `.comfy_quant` JSON to include:
+| Key | Value |
+|-----|-------|
+| `format` | `bnb_nf4`, `bnb_fp4`, or `bnb_af4` |
+| `group_size` | Block size (64 or 128) |
+| `quant_type` | `nf4`, `fp4`, or `af4` |
+| `dtype` | Original dtype (e.g., `float16`) |
+| `shape` | Original tensor shape |
+| `quant_map` | 16-value codebook as list |
+
+**Legacy path (no `--comfy_quant`)**: Now uses bitsandbytes-compatible structure:
+| Tensor | Content |
+|--------|---------|
+| `.absmax` | Per-block scales (float32) |
+| `.quant_map` | 16-value codebook (float32) |
+| `.quant_state.bitsandbytes__<type>` | JSON with quant_type, blocksize, dtype, shape |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `convert_to_quant/convert_to_quant.py` | Added codebook imports, `get_4bit_codebook()` helper, extended `create_comfy_quant_tensor()`, updated comfy path, added legacy bitsandbytes structure |
+| `convert_to_quant/comfy/quant_ops.py` | Added `AF4_CODEBOOK` import, `bnb_af4` entry in `QUANT_ALGOS`, updated parameter sets |
+
+---
+
 ## 2025-12-18: Fix --input_scale for Non-comfy Mode
 
 ### Session Summary
