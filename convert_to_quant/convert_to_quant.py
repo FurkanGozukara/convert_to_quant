@@ -2718,6 +2718,7 @@ def convert_int8_to_comfy_quant(
     int8_layers = []
     hp_layers = []
     already_converted = []
+    detected_formats = {}  # Track format detection counts
 
     for base_name, layer_data in tqdm(layer_info.items(), desc="Processing layers"):
         weight = layer_data.get('weight')
@@ -2786,6 +2787,7 @@ def convert_int8_to_comfy_quant(
 
                 # Check if .comfy_quant already exists in other_tensors
                 if f"{base_name}.comfy_quant" not in other_tensors:
+                    detected_formats[detected_format] = detected_formats.get(detected_format, 0) + 1
                     comfy_quant_tensor = create_comfy_quant_tensor(
                         detected_format,
                         block_size=detected_block_size,
@@ -2840,6 +2842,7 @@ def convert_int8_to_comfy_quant(
                     print(f"    → Format: {detected_format} (scale ndim={scale_weight.ndim}, using CLI default)")
 
                 # Create .comfy_quant metadata
+                detected_formats[detected_format] = detected_formats.get(detected_format, 0) + 1
                 comfy_quant_tensor = create_comfy_quant_tensor(
                     detected_format,
                     block_size=detected_block_size,
@@ -2870,8 +2873,13 @@ def convert_int8_to_comfy_quant(
     print(f"  High-precision layers: {len(hp_layers)}")
     print(f"  Other tensors:         {len(other_tensors)}")
     print(f"  Total output tensors:  {len(output_tensors)}")
-    print(f"  INT8 format:           {int8_format}")
-    print(f"  Block size:            {block_size}")
+    if detected_formats:
+        print(f"  Detected formats:")
+        for fmt, count in sorted(detected_formats.items(), key=lambda x: -x[1]):
+            print(f"    {fmt}: {count} layers")
+    else:
+        print(f"  INT8 format (CLI):     {int8_format}")
+        print(f"  Block size (CLI):      {block_size}")
     print("-" * 60)
 
     # Save output
