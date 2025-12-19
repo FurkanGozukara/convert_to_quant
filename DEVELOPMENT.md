@@ -1,5 +1,105 @@
 # Development Log
 
+## 2025-12-19: Failed 4-bit NF4 Dequantization Fix Attempts
+
+### Session Summary
+**UNRESOLVED**: Multiple attempts to fix `RuntimeError: expected mat1 and mat2 to have the same dtype, but got: struct c10::BFloat16 != unsigned char` when loading 4-bit quantized models in ComfyUI-QuantOps. None of the attempted fixes resolved the issue.
+
+---
+
+### The Error
+When loading NF4/FP4/AF4 4-bit quantized models, inference fails at the first linear layer with a dtype mismatch: input is BFloat16 but weight remains as uint8 (packed 4-bit values) instead of being dequantized.
+
+Traceback path:
+```
+nf4_ops.py:forward() → forward_comfy_cast_weights() → F.linear()
+  → comfy/quant_ops.py:__torch_dispatch__() → nf4_layout.py:nf4_linear()
+  → F.linear(input_tensor, weight, bias)  ← weight is still uint8!
+```
+
+### Attempts Made (All Failed)
+
+| # | Approach | Why It Failed |
+|---|----------|---------------|
+| 1 | Added `filter_keys=False` in `loader_nodes.py` to preserve quant metadata | Metadata preserved but QuantizedTensor still not dequantizing |
+| 2 | Added bitsandbytes import to `nf4_ops.py`, tried `bnb_F.dequantize_4bit()` in `_dequantize_weight()` | `_dequantize_weight()` never reached - code hits QuantizedTensor path |
+| 3 | Rewrote `nf4_layout.py:dequantize()` to use `bnb_F.dequantize_4bit()` | Same error - underlying issue not in dequantize method |
+| 4 | Added pure PyTorch fallback (unpack nibbles, codebook lookup, blockwise scales) | Fallback never reached |
+
+### Root Cause Analysis (Incomplete)
+
+The model loading flow:
+1. `QuantizedUNETLoader.load_unet()` loads state dict
+2. `HybridNF4Ops.Linear._load_from_state_dict()` creates `QuantizedTensor` wrapper
+3. `forward_comfy_cast_weights()` detects `QuantizedTensor`, calls `F.linear()`
+4. PyTorch dispatches to `nf4_linear()` handler
+5. Handler calls `weight.dequantize()` → **should call `NF4Layout.dequantize()`**
+6. **Something fails** - weight remains uint8
+
+Suspected issues that were NOT fully investigated:
+- Is `QuantizedTensor.__torch_dispatch__` actually being called?
+- Is `_get_layout_from_args()` finding the QuantizedTensor?
+- Is `_LAYOUT_REGISTRY` properly populated with `"NF4Layout"` entry?
+- Is there a class identity issue between `QuantizedTensor` in `comfy.quant_ops` vs the one we import?
+- Is `load_state_dict()` with `strict=False` silently failing to trigger `_load_from_state_dict`?
+
+### Files Modified (Changes Did Not Fix Issue)
+
+| File | Changes |
+|------|---------|
+| `ComfyUI-QuantOps/nf4_ops.py` | Added `bitsandbytes.functional` import, rewrote `_dequantize_weight()` to try bnb_F first with PyTorch fallback |
+| `ComfyUI-QuantOps/quant_layouts/nf4_layout.py` | Complete rewrite: replaced nonexistent `nf4_kernels.py` dependency with `bitsandbytes.functional.dequantize_4bit()` and pure PyTorch fallback |
+| `ComfyUI-QuantOps/nodes/loader_nodes.py` | Changed `filter_keys=True` to `filter_keys=False` to preserve quant metadata |
+
+### What Would Need Further Investigation
+
+1. **Add extensive logging** to trace the exact path through `__torch_dispatch__`
+2. **Verify layout registration** - is `"NF4Layout"` actually in `_LAYOUT_REGISTRY[torch.ops.aten.linear.default]`?
+3. **Check if `_load_from_state_dict` is called** - add logging to confirm QuantizedTensor creation
+4. **Inspect the QuantizedTensor at runtime** - what are its `_layout_type` and `_layout_params`?
+5. **Compare with working INT8 flow** - INT8 models work, so compare the code paths
+
+---
+
+
+## 2025-12-18: Fix NF4/FP4/AF4 Layer Structure for Loader Detection
+
+### Session Summary
+Fixed 4-bit quantization output structure so loaders can automatically identify and dequantize NF4/FP4/AF4 weights.
+
+---
+
+### The Problem
+When using 4-bit formats without `--comfy_quant`, the script incorrectly wrote `.scale_weight` (FP8/INT8 convention). The comfy_quant path also lacked critical metadata (codebook, dtype, shape) needed for dequantization.
+
+### Changes
+
+**Comfy path (`--comfy_quant`)**: Extended `.comfy_quant` JSON to include:
+| Key | Value |
+|-----|-------|
+| `format` | `bnb_nf4`, `bnb_fp4`, or `bnb_af4` |
+| `group_size` | Block size (64 or 128) |
+| `quant_type` | `nf4`, `fp4`, or `af4` |
+| `dtype` | Original dtype (e.g., `float16`) |
+| `shape` | Original tensor shape |
+| `quant_map` | 16-value codebook as list |
+
+**Legacy path (no `--comfy_quant`)**: Now uses bitsandbytes-compatible structure:
+| Tensor | Content |
+|--------|---------|
+| `.absmax` | Per-block scales (float32) |
+| `.quant_map` | 16-value codebook (float32) |
+| `.quant_state.bitsandbytes__<type>` | JSON with quant_type, blocksize, dtype, shape |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `convert_to_quant/convert_to_quant.py` | Added codebook imports, `get_4bit_codebook()` helper, extended `create_comfy_quant_tensor()`, updated comfy path, added legacy bitsandbytes structure |
+| `convert_to_quant/comfy/quant_ops.py` | Added `AF4_CODEBOOK` import, `bnb_af4` entry in `QUANT_ALGOS`, updated parameter sets |
+
+---
+
 ## 2025-12-18: Fix --input_scale for Non-comfy Mode
 
 ### Session Summary

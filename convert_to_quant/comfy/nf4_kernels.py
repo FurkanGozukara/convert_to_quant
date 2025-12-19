@@ -166,16 +166,20 @@ def _quantize_to_codebook_pytorch(
     tensor: torch.Tensor,
     codebook: torch.Tensor,
     absmax: torch.Tensor,
-    block_size: int
+    block_size: int,
+    chunk_size: int = 8192
 ) -> torch.Tensor:
     """
     Quantize normalized tensor to nearest codebook index using PyTorch.
+    
+    Processes in chunks to avoid OOM on large tensors.
     
     Args:
         tensor: Input tensor to quantize
         codebook: 16-value codebook
         absmax: Per-block absolute maximum
         block_size: Block size for quantization
+        chunk_size: Number of blocks to process at once (default 8192)
         
     Returns:
         Tensor of codebook indices (0-15)
@@ -194,12 +198,23 @@ def _quantize_to_codebook_pytorch(
     absmax_safe = torch.clamp(absmax_flat, min=1e-12)
     normalized = tensor_blocked / absmax_safe.unsqueeze(-1)
     
-    # Find nearest codebook entry for each value
-    # codebook shape: (16,), normalized shape: (n_blocks, block_size)
-    # Expand for broadcasting: normalized -> (n_blocks, block_size, 1)
-    # codebook -> (1, 1, 16)
-    diff = (normalized.unsqueeze(-1) - codebook.reshape(1, 1, -1)).abs()
-    indices = diff.argmin(dim=-1)  # Shape: (n_blocks, block_size)
+    # Process in chunks to avoid OOM on large tensors
+    # The broadcast (n_blocks, block_size, 16) can be huge for large layers
+    if n_blocks <= chunk_size:
+        # Small tensor - process all at once
+        diff = (normalized.unsqueeze(-1) - codebook.reshape(1, 1, -1)).abs()
+        indices = diff.argmin(dim=-1)
+    else:
+        # Large tensor - process in chunks
+        indices = torch.empty(n_blocks, block_size, dtype=torch.long, device=tensor.device)
+        codebook_broadcast = codebook.reshape(1, 1, -1)
+        
+        for start in range(0, n_blocks, chunk_size):
+            end = min(start + chunk_size, n_blocks)
+            chunk = normalized[start:end]  # (chunk_size, block_size)
+            diff = (chunk.unsqueeze(-1) - codebook_broadcast).abs()
+            indices[start:end] = diff.argmin(dim=-1)
+            del diff, chunk  # Free memory immediately
     
     return indices.reshape(original_shape)
 
