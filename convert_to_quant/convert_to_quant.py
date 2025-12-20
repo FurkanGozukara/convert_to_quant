@@ -637,8 +637,8 @@ def edit_comfy_quant(
     """
     from safetensors import safe_open
 
-    print(f"ComfyQuant Layer Editor")
-    print(f"=" * 60)
+    print("ComfyQuant Layer Editor")
+    print("=" * 60)
     print(f"Input:  {input_file}")
     print(f"Output: {output_file}")
 
@@ -3630,7 +3630,7 @@ def add_legacy_input_scale(
         input_file: Path to input fp8_scaled safetensors file
         output_file: Path to output safetensors file
     """
-    print(f"Adding .scale_input to legacy fp8_scaled model")
+    print("Adding .scale_input to legacy fp8_scaled model")
     print(f"Input: {input_file}")
     print(f"Output: {output_file}")
     print("-" * 60)
@@ -3668,7 +3668,7 @@ def add_legacy_input_scale(
         # Handle scaled_fp8 marker - convert to single-element vector
         if key == "scaled_fp8":
             output_tensors[key] = torch.tensor([1], dtype=tensor.dtype)
-            print(f"  Converted scaled_fp8 marker to single-element tensor")
+            print("  Converted scaled_fp8 marker to single-element tensor")
             continue
 
         # Copy all tensors through
@@ -3745,7 +3745,7 @@ def convert_int8_to_comfy_quant(
         kernel_backend: "blockwise" or "lodewise" for INT8 format type
         include_input_scale: If True, add input_scale tensor (1.0 fp32) when missing
     """
-    print(f"Converting INT8 legacy format to comfy_quant format")
+    print("Converting INT8 legacy format to comfy_quant format")
     print(f"Input: {input_file}")
     print(f"Output: {output_file}")
     print(f"Block size: {block_size}")
@@ -4053,7 +4053,7 @@ def convert_int8_to_comfy_quant(
     print(f"  Other tensors:         {len(other_tensors)}")
     print(f"  Total output tensors:  {len(output_tensors)}")
     if detected_formats:
-        print(f"  Detected formats:")
+        print("  Detected formats:")
         for fmt, count in sorted(detected_formats.items(), key=lambda x: -x[1]):
             print(f"    {fmt}: {count} layers")
     else:
