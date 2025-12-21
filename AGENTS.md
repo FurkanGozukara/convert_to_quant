@@ -24,10 +24,10 @@
 | Component | Location |
 |-----------|----------|
 | Main script | `convert_to_quant/convert_to_quant.py` |
-| Kernels | `convert_to_quant/comfy/` (nf4, int8, fp8) |
+| Kernels | `convert_to_quant/comfy/` (int8, fp8) |
 | Layout classes | `convert_to_quant/comfy/quant_ops.py` |
 
-**Supported formats**: FP8 (tensor/row/block), INT8 (blockwise/lodewise), NF4, FP4
+**Supported formats**: FP8 (tensor/row/block), INT8 (blockwise)
 
 ---
 
@@ -52,13 +52,6 @@ convert_to_quant -i model.safetensors --comfy_quant
 
 # INT8 with heuristics
 convert_to_quant -i model.safetensors --int8 --comfy_quant --heur
-
-# NF4 4-bit
-convert_to_quant -i model.safetensors --nf4 --comfy_quant
-
-# Three-tier quantization
-convert_to_quant -i model.safetensors --fp4 --fallback=fp8 \
-    --custom-layers=".*pattern.*" --custom-type=int8 --comfy_quant
 ```
 
 ---
@@ -83,7 +76,7 @@ if my_model and any(n in key for n in MODEL_AVOID_KEY_NAMES):
 # Per-layer .comfy_quant configuration (stored as JSON in torch.uint8 tensor)
 comfy_quant = {
     "format": "float8_e4m3fn",  # or float8_e4m3fn_rowwise, float8_e4m3fn_blockwise,
-                                # int8_blockwise, int8_lodewise, bnb_nf4, bnb_fp4
+                                # int8_blockwise
     "group_size": 64,           # Optional: for block-based formats only
     "full_precision_matrix_mult": True  # Optional: only if True
 }

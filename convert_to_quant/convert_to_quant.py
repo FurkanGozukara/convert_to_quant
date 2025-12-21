@@ -13,52 +13,7 @@ import gc
 import math
 import json
 from torch.optim import AdamW, RAdam
-from .comfy.quant_ops import BlockWiseINT8Layout, BlockWiseINT8LayoutLodeWise
-
-# NF4/FP4 kernels
-try:
-    from .comfy.nf4_kernels import (
-        quantize_nf4,
-        dequantize_nf4,
-        quantize_fp4,
-        dequantize_fp4,
-        quantize_af4,
-        dequantize_af4,
-        QuantState4bit,
-        NF4_CODEBOOK,
-        FP4_CODEBOOK_NORMALIZED,
-        AF4_CODEBOOK,
-    )
-
-    _HAS_NF4 = True
-except ImportError:
-    _HAS_NF4 = False
-
-
-def get_4bit_codebook(quant_type: str) -> torch.Tensor:
-    """Get the codebook tensor for a 4-bit quantization type."""
-    if not _HAS_NF4:
-        raise RuntimeError("4-bit kernels not available")
-    if quant_type == "nf4":
-        return NF4_CODEBOOK.clone()
-    elif quant_type == "fp4":
-        return FP4_CODEBOOK_NORMALIZED.clone()
-    elif quant_type == "af4":
-        return AF4_CODEBOOK.clone()
-    raise ValueError(f"Unknown 4-bit quant_type: {quant_type}")
-
-
-# Lode-Wise INT8 kernels (alternative INT8 quantization backend with per-output-lane scale access)
-try:
-    from .comfy.int8_kernels import (
-        weight_quant as lodewise_weight_quant,
-        weight_dequant as lodewise_weight_dequant,
-        int8_gemm_lodewise,
-    )
-
-    _HAS_LODEWISE = True
-except ImportError:
-    _HAS_LODEWISE = False
+from .comfy.quant_ops import BlockWiseINT8Layout
 
 # --- Constants and Configuration ---
 torch.set_printoptions(precision=8)
@@ -217,10 +172,6 @@ VALID_QUANT_FORMATS = {
     "float8_e4m3fn_blockwise",
     "float8_e4m3fn_block3d",
     "int8_blockwise",
-    "int8_lodewise",
-    "bnb_nf4",
-    "bnb_fp4",
-    "bnb_af4",
 }
 
 
@@ -468,38 +419,24 @@ def create_comfy_quant_tensor(
     format_type: str,
     block_size: Optional[int] = None,
     full_precision_matrix_mult: Optional[bool] = None,
-    # 4-bit specific metadata
-    quant_type: Optional[str] = None,
-    original_dtype: Optional[str] = None,
-    original_shape: Optional[Tuple[int, ...]] = None,
-    quant_map: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Create a .comfy_quant layer configuration tensor for ComfyUI.
 
     Args:
         format_type: One of "float8_e4m3fn", "float8_e4m3fn_rowwise", "float8_e4m3fn_blockwise",
-                     "int8_blockwise", "int8_lodewise", "bnb_nf4", "bnb_fp4", or "bnb_af4"
+                     or "int8_blockwise"
         block_size: Block/group size for quantization (for block-based formats)
         full_precision_matrix_mult: If True, adds "full_precision_matrix_mult": True.
                                     If False or None, this key is omitted.
-        quant_type: For 4-bit formats: "nf4", "fp4", or "af4"
-        original_dtype: For 4-bit formats: original tensor dtype string (e.g., "float16")
-        original_shape: For 4-bit formats: original tensor shape as tuple
-        quant_map: For 4-bit formats: 16-value codebook tensor
 
     Returns:
         torch.uint8 tensor containing JSON-encoded layer configuration
     """
     BLOCK_BASED_FORMATS = (
         "int8_blockwise",
-        "int8_lodewise",
-        "bnb_nf4",
-        "bnb_fp4",
-        "bnb_af4",
         "float8_e4m3fn_blockwise",
     )
-    FOUR_BIT_FORMATS = ("bnb_nf4", "bnb_fp4", "bnb_af4")
 
     comfy_quant = {"format": format_type}
 
@@ -509,18 +446,6 @@ def create_comfy_quant_tensor(
 
     if full_precision_matrix_mult is True:
         comfy_quant["full_precision_matrix_mult"] = True
-
-    # Add 4-bit specific metadata
-    if format_type in FOUR_BIT_FORMATS:
-        if quant_type is not None:
-            comfy_quant["quant_type"] = quant_type
-        if original_dtype is not None:
-            comfy_quant["dtype"] = original_dtype
-        if original_shape is not None:
-            comfy_quant["shape"] = list(original_shape)
-        if quant_map is not None:
-            # Store codebook as list of floats for JSON serialization
-            comfy_quant["quant_map"] = quant_map.tolist()
 
     return dict_to_tensor(comfy_quant)
 
@@ -824,7 +749,6 @@ class LearnedRoundingConverter:
         full_matrix=False,
         target_format="fp8",
         no_learned_rounding=False,
-        kernel_backend="triton",
         lr_schedule="adaptive",
         lr_gamma=0.99,
         lr_patience=50,
@@ -850,7 +774,6 @@ class LearnedRoundingConverter:
         self.full_matrix = full_matrix
         self.target_format = target_format
         self.no_learned_rounding = no_learned_rounding
-        self.kernel_backend = kernel_backend
         self.optimizer_kwargs = kwargs
 
         # LR schedule configuration (for 'original' optimizer)
@@ -872,8 +795,8 @@ class LearnedRoundingConverter:
         self.early_stop_lr = early_stop_lr
         self.early_stop_stall = early_stop_stall
 
-        # INT8 and 4-bit always use block-wise scaling
-        if target_format in ("int8", "nf4", "fp4", "af4"):
+        # INT8 always uses block-wise scaling
+        if target_format == "int8":
             scaling_mode = "block"
         # Normalize block3d alias to block
         if scaling_mode == "block3d":
@@ -885,10 +808,6 @@ class LearnedRoundingConverter:
             # INT8 uses integer symmetric range [-127, 127]
             self.target_dtype = TARGET_INT8_DTYPE
             self.f8_max_val = None  # Not applicable to INT8
-        elif self.target_format in ("nf4", "fp4", "af4"):
-            # 4-bit quantization uses uint8 for packed storage (2 values per byte)
-            self.target_dtype = torch.uint8
-            self.f8_max_val = None  # Not applicable to 4-bit
         else:
             # FP8 uses floating point range constants
             self.target_dtype = TARGET_FP8_DTYPE
@@ -905,8 +824,6 @@ class LearnedRoundingConverter:
         print(f"  - Scaling mode: {self.scaling_mode}")
         if self.scaling_mode in ("block", "block2d"):
             print(f"    - Block size: {self.block_size}")
-        if self.target_format == "int8":
-            print(f"  - Kernel backend: {self.kernel_backend}")
 
     def _optimize_adamw(
         self,
@@ -1269,18 +1186,6 @@ class LearnedRoundingConverter:
         if self.target_format == "int8":
             return self._convert_int8(W_float32)
 
-        # NF4 quantization path
-        if self.target_format == "nf4":
-            return self._convert_nf4(W_float32)
-
-        # FP4 quantization path
-        if self.target_format == "fp4":
-            return self._convert_fp4(W_float32)
-
-        # AF4 quantization path
-        if self.target_format == "af4":
-            return self._convert_af4(W_float32)
-
         # FP8 quantization path - route based on scaling_mode
         if self.scaling_mode == "row":
             return self._convert_fp8_rowwise(W_float32)
@@ -1311,18 +1216,11 @@ class LearnedRoundingConverter:
             )
 
         # Select quantization backend
-        if self.kernel_backend == "lodewise":
-            # Use BlockWiseINT8LayoutLodeWise for per-row scale format (N, K//block_size)
-            qdata, layout_params = BlockWiseINT8LayoutLodeWise.quantize(
-                W_float32, block_size=self.block_size, is_weight=True
-            )
-            scale = layout_params["scale"]  # Shape: (N, K//block_size)
-        else:
-            # Use BlockWiseINT8Layout (default 'blockwise' backend from quant_ops.py)
-            qdata, layout_params = BlockWiseINT8Layout.quantize(
-                W_float32, block_size=self.block_size, is_weight=True
-            )
-            scale = layout_params["scale"]  # Shape: (M//block_size, N//block_size)
+        # Use BlockWiseINT8Layout (blockwise backend from quant_ops.py)
+        qdata, layout_params = BlockWiseINT8Layout.quantize(
+            W_float32, block_size=self.block_size, is_weight=True
+        )
+        scale = layout_params["scale"]  # Shape: (M//block_size, N//block_size)
 
         # Optional: Apply learned rounding optimization for INT8
         if not self.no_learned_rounding and self.num_iter > 0:
@@ -1330,14 +1228,9 @@ class LearnedRoundingConverter:
             qdata, scale = self._optimize_int8_learned_rounding(W_float32, qdata, scale)
 
         # Dequantize to get the reconstructed weight for bias correction
-        if self.kernel_backend == "lodewise":
-            dequantized_weight = BlockWiseINT8LayoutLodeWise.dequantize(
-                qdata, scale, self.block_size, is_weight=True, orig_dtype=COMPUTE_DTYPE
-            )
-        else:
-            dequantized_weight = BlockWiseINT8Layout.dequantize(
-                qdata, scale, self.block_size, is_weight=True, orig_dtype=COMPUTE_DTYPE
-            )
+        dequantized_weight = BlockWiseINT8Layout.dequantize(
+            qdata, scale, self.block_size, is_weight=True, orig_dtype=COMPUTE_DTYPE
+        )
 
         # Clean up
         del W_float32
@@ -1390,7 +1283,6 @@ class LearnedRoundingConverter:
         Supports multiple optimizer choices: original, adamw, radam.
         """
         M, N = W_float32.shape
-        block_size = self.block_size
 
         # Compute SVD for the optimization
         max_rank = min(W_float32.shape)
@@ -1795,495 +1687,6 @@ class LearnedRoundingConverter:
         del qdata_float, q_refined
         return final_qdata
 
-    def _convert_nf4(
-        self, W_float32: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        NF4 (4-bit Normal Float) quantization using codebook-based quantization.
-
-        NF4 uses a 16-value codebook derived from the normal distribution,
-        with block-wise scaling for precision.
-
-        Returns:
-            Tuple of (packed_qdata, absmax, dequantized_weight)
-            - packed_qdata: uint8 tensor with 2 values per byte
-            - absmax: per-block absolute maximum scales
-            - dequantized_weight: reconstructed weight for bias correction
-        """
-        if not _HAS_NF4:
-            raise RuntimeError(
-                "NF4 kernels not available. Check kernels/nf4_kernels.py"
-            )
-
-        M, N = W_float32.shape
-        print(f"    - NF4 quantization with block_size={self.block_size}")
-
-        # Quantize using NF4 kernels
-        packed, quant_state = quantize_nf4(
-            W_float32, self.block_size, compress_statistics=False
-        )
-
-        # Apply learned rounding optimization if enabled
-        if not self.no_learned_rounding and self.num_iter > 0:
-            print(f"    - Applying absmax optimization ({self.num_iter} iterations)")
-            packed, quant_state = self._optimize_nf4_learned_rounding(
-                W_float32, packed, quant_state, "nf4"
-            )
-
-        # Dequantize for bias correction
-        dequantized_weight = dequantize_nf4(
-            packed, quant_state, output_dtype=COMPUTE_DTYPE
-        )
-
-        # Clean up
-        gc.collect()
-        if self.device == "cuda":
-            torch.cuda.empty_cache()
-
-        return (
-            packed,
-            quant_state.absmax.to(device=self.device, dtype=SCALE_DTYPE),
-            dequantized_weight,
-        )
-
-    def _convert_fp4(
-        self, W_float32: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        FP4 (4-bit Floating Point) quantization using codebook-based quantization.
-
-        FP4 uses a 16-value codebook representing a hardware-inspired
-        4-bit floating point format.
-
-        Returns:
-            Tuple of (packed_qdata, absmax, dequantized_weight)
-        """
-        if not _HAS_NF4:
-            raise RuntimeError(
-                "FP4 kernels not available. Check kernels/nf4_kernels.py"
-            )
-
-        M, N = W_float32.shape
-        print(f"    - FP4 quantization with block_size={self.block_size}")
-
-        # Quantize using FP4 kernels
-        packed, quant_state = quantize_fp4(
-            W_float32, self.block_size, compress_statistics=False
-        )
-
-        # Apply learned rounding optimization if enabled
-        if not self.no_learned_rounding and self.num_iter > 0:
-            print(f"    - Applying absmax optimization ({self.num_iter} iterations)")
-            packed, quant_state = self._optimize_nf4_learned_rounding(
-                W_float32, packed, quant_state, "fp4"
-            )
-
-        # Dequantize for bias correction
-        dequantized_weight = dequantize_fp4(
-            packed, quant_state, output_dtype=COMPUTE_DTYPE
-        )
-
-        # Clean up
-        gc.collect()
-        if self.device == "cuda":
-            torch.cuda.empty_cache()
-
-        return (
-            packed,
-            quant_state.absmax.to(device=self.device, dtype=SCALE_DTYPE),
-            dequantized_weight,
-        )
-
-    def _convert_af4(
-        self, W_float32: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        AF4 (AbnormalFloat4) quantization using codebook-based quantization.
-
-        AF4 uses an alternative 16-value codebook optimized for block_size=64.
-        Reference: "NF4 Isn't Information Theoretically Optimal (and that's Good)"
-        https://arxiv.org/abs/2306.06965
-
-        Returns:
-            Tuple of (packed_qdata, absmax, dequantized_weight)
-        """
-        if not _HAS_NF4:
-            raise RuntimeError(
-                "AF4 kernels not available. Check kernels/nf4_kernels.py"
-            )
-
-        M, N = W_float32.shape
-        print(f"    - AF4 quantization with block_size={self.block_size}")
-        if self.block_size != 64:
-            print(
-                f"    - WARNING: AF4 is optimized for block_size=64, got {self.block_size}"
-            )
-
-        # Quantize using AF4 kernels
-        packed, quant_state = quantize_af4(
-            W_float32, self.block_size, compress_statistics=False
-        )
-
-        # Apply learned rounding optimization if enabled
-        if not self.no_learned_rounding and self.num_iter > 0:
-            print(f"    - Applying absmax optimization ({self.num_iter} iterations)")
-            packed, quant_state = self._optimize_nf4_learned_rounding(
-                W_float32, packed, quant_state, "af4"
-            )
-
-        # Dequantize for bias correction
-        dequantized_weight = dequantize_af4(
-            packed, quant_state, output_dtype=COMPUTE_DTYPE
-        )
-
-        # Clean up
-        gc.collect()
-        if self.device == "cuda":
-            torch.cuda.empty_cache()
-
-        return (
-            packed,
-            quant_state.absmax.to(device=self.device, dtype=SCALE_DTYPE),
-            dequantized_weight,
-        )
-
-    def _optimize_nf4_learned_rounding(
-        self,
-        W_float32: torch.Tensor,
-        packed: torch.Tensor,
-        quant_state: QuantState4bit,
-        quant_type: str,  # "nf4", "fp4", or "af4"
-    ) -> Tuple[torch.Tensor, QuantState4bit]:
-        """
-        Apply learned rounding optimization for 4-bit quantization.
-        Optimizes absmax scales to minimize SVD-projected reconstruction error.
-
-        Args:
-            W_float32: Original weight tensor
-            packed: Packed 4-bit quantized data
-            quant_state: Quantization state with absmax scales
-            quant_type: "nf4", "fp4", or "af4"
-
-        Returns:
-            Tuple of (optimized_packed, optimized_quant_state)
-        """
-        M, N = W_float32.shape
-
-        # Compute SVD for the optimization
-        max_rank = min(M, N)
-        k = min(self.max_k, max(self.min_k, int(math.floor(self.top_p * max_rank))))
-        k = min(k, max_rank)
-
-        print(
-            f"    - Shape: {list(W_float32.shape)}, Max rank: {max_rank}. Using k={k} SVD components."
-        )
-
-        if self.full_matrix:
-            print("    - Using torch.linalg.svd with full_matrices=True")
-            U, _, Vh = torch.linalg.svd(W_float32, full_matrices=True, driver="gesvd")
-        else:
-            try:
-                print("    - Trying svd_lowrank")
-                U, _, Vh = torch.svd_lowrank(
-                    W_float32, q=min(k + 10, max_rank), niter=4
-                )
-                Vh = Vh.T
-            except RuntimeError:
-                print("    - svd_lowrank failed, falling back to full SVD.")
-                U, _, Vh = torch.linalg.svd(W_float32, full_matrices=False)
-
-        U_k, Vh_k = U[:, :k], Vh[:k, :]
-
-        # Route to optimizer (only 'original' for now)
-        if self.optimizer_choice == "original":
-            optimized_packed, optimized_absmax = self._optimize_nf4_original(
-                W_float32, packed, quant_state, U_k, Vh_k, quant_type
-            )
-        else:
-            print(
-                f"    - WARNING: Optimizer '{self.optimizer_choice}' not supported for NF4/FP4/AF4, using 'original'"
-            )
-            optimized_packed, optimized_absmax = self._optimize_nf4_original(
-                W_float32, packed, quant_state, U_k, Vh_k, quant_type
-            )
-
-        del U, Vh, U_k, Vh_k
-        gc.collect()
-        if self.device == "cuda":
-            torch.cuda.empty_cache()
-
-        # Create new quant_state with optimized absmax
-        optimized_quant_state = QuantState4bit(
-            absmax=optimized_absmax,
-            shape=quant_state.shape,
-            code=quant_state.code,
-            blocksize=quant_state.blocksize,
-            quant_type=quant_state.quant_type,
-            dtype=quant_state.dtype,
-            offset=quant_state.offset,
-            nested_absmax=quant_state.nested_absmax,
-            nested_code=quant_state.nested_code,
-        )
-
-        return optimized_packed, optimized_quant_state
-
-    def _optimize_nf4_original(
-        self,
-        W_float32: torch.Tensor,
-        packed: torch.Tensor,
-        quant_state: QuantState4bit,
-        U_k: torch.Tensor,
-        Vh_k: torch.Tensor,
-        quant_type: str,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Optimize absmax scales via gradient descent with full LR schedule support.
-
-        For 4-bit codebook quantization, we can't adjust individual quantized values
-        (they're fixed to 16 codebook entries). Instead, we optimize the absmax scales
-        which effectively shifts the quantization grid, then re-quantize.
-        """
-        from .comfy.nf4_kernels import quantize_4bit, dequantize_4bit
-
-        M, N = W_float32.shape
-        block_size = self.block_size
-
-        # Start with the original absmax
-        absmax = quant_state.absmax.clone()
-
-        # Track best results
-        best_loss = float("inf")
-        best_absmax = absmax.clone()
-        best_packed = packed.clone()
-
-        worse_loss_counter = 0
-        plateau_counter = 0
-        cooldown_counter = 0
-        curr_lr = self.optimizer_kwargs.get("lr", 8.077300000003e-3)
-        small_mult = 0.95 if M == N else 1.0
-        schedule_name = self.lr_schedule
-
-        # Shape-aware plateau parameters (same as FP8/INT8)
-        aspect_ratio = max(M, N) / min(M, N)
-
-        if schedule_name == "plateau" and self.lr_shape_influence > 0:
-            ar_factor = math.sqrt(aspect_ratio)
-            blend = self.lr_shape_influence
-            effective_patience = self.lr_patience
-            raw_factor = self.lr_factor
-            aggressive_factor = raw_factor**ar_factor
-            effective_factor = raw_factor + (aggressive_factor - raw_factor) * blend
-            effective_cooldown = self.lr_cooldown
-        else:
-            effective_patience = self.lr_patience
-            effective_factor = self.lr_factor
-            effective_cooldown = self.lr_cooldown
-
-        pbar = tqdm(
-            range(self.num_iter),
-            desc=f"    Optimizing {quant_type.upper()} ({schedule_name})",
-            leave=False,
-            dynamic_ncols=True,
-        )
-        for i in pbar:
-            with torch.no_grad():
-                # Re-quantize with current absmax (this finds new indices!)
-                curr_packed, curr_quant_state = quantize_4bit(
-                    W_float32,
-                    block_size,
-                    quant_type,
-                    compress_statistics=False,
-                    custom_absmax=absmax,
-                )
-
-                # Dequantize to get reconstruction
-                dequant = dequantize_4bit(
-                    curr_packed, curr_quant_state, output_dtype=COMPUTE_DTYPE
-                )
-                dequant = dequant.reshape(M, N)
-
-                # Compute SVD-projected error
-                error = dequant - W_float32
-                proj_error = U_k.T @ error @ Vh_k.T
-                loss = torch.linalg.norm(proj_error)
-
-            current_loss = loss.item()
-
-            # Check if improvement exceeds threshold (supports rel/abs mode)
-            if self.lr_threshold > 0:
-                if self.lr_threshold_mode == "rel":
-                    improved = current_loss < best_loss * (1.0 - self.lr_threshold)
-                else:
-                    improved = (best_loss - current_loss) > self.lr_threshold
-            else:
-                improved = current_loss < best_loss
-
-            prev_worse_counter = worse_loss_counter
-
-            if improved:
-                best_loss = current_loss
-                best_absmax = absmax.clone()
-                best_packed = curr_packed.clone()
-                plateau_counter = 0
-                if self.lr_adaptive_mode == "simple-reset":
-                    worse_loss_counter = 0
-            else:
-                worse_loss_counter += 1
-                plateau_counter += 1
-
-            # LR update based on schedule (identical to FP8/INT8)
-            if schedule_name == "exponential":
-                curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
-            elif schedule_name == "plateau":
-                if cooldown_counter > 0:
-                    cooldown_counter -= 1
-                elif plateau_counter >= effective_patience:
-                    if curr_lr > self.lr_min:
-                        curr_lr = max(curr_lr * effective_factor, self.lr_min)
-                        cooldown_counter = effective_cooldown
-                    plateau_counter = 0
-            else:  # 'adaptive' tier-based
-                counter_for_tier = (
-                    prev_worse_counter
-                    if (improved and self.lr_adaptive_mode == "no-reset")
-                    else worse_loss_counter
-                )
-
-                if improved and counter_for_tier < 50:
-                    curr_lr = min(curr_lr * (1.25 * small_mult), 100.0)
-                elif improved and counter_for_tier >= 50 and counter_for_tier < 75:
-                    curr_lr = min(curr_lr * (1.375 * small_mult), 100.0)
-                elif improved and counter_for_tier >= 75 and counter_for_tier < 100:
-                    curr_lr = min(curr_lr * (1.5 * small_mult), 100.0)
-                elif improved and counter_for_tier >= 100 and counter_for_tier < 125:
-                    curr_lr = min(curr_lr * (1.75 * small_mult), 100.0)
-                elif improved and counter_for_tier >= 125 and counter_for_tier < 150:
-                    curr_lr = min(curr_lr * (2.0 * small_mult), 100.0)
-                elif improved and counter_for_tier >= 150 and counter_for_tier < 200:
-                    curr_lr = min(curr_lr * (2.25 * small_mult), 100.0)
-                elif improved and counter_for_tier >= 200 and counter_for_tier < 250:
-                    curr_lr = min(curr_lr * (2.5 * small_mult), 100.0)
-                elif improved and counter_for_tier >= 250 and counter_for_tier < 300:
-                    curr_lr = min(curr_lr * (2.75 * small_mult), 100.0)
-                elif improved and counter_for_tier >= 300:
-                    curr_lr = min(curr_lr * (3.0 * small_mult), 100.0)
-                elif not improved and worse_loss_counter < 26:
-                    curr_lr = max(curr_lr * (0.95 * small_mult), 9e-8)
-                elif worse_loss_counter >= 26 and worse_loss_counter < 51:
-                    curr_lr = max(curr_lr * (0.97 * small_mult), 8e-8)
-                elif worse_loss_counter >= 51 and worse_loss_counter < 76:
-                    curr_lr = max(curr_lr * (0.985 * small_mult), 7e-8)
-                elif worse_loss_counter >= 76 and worse_loss_counter < 101:
-                    curr_lr = max(curr_lr * (0.9875 * small_mult), 6e-8)
-                elif worse_loss_counter >= 101 and worse_loss_counter < 151:
-                    curr_lr = max(curr_lr * (0.98875 * small_mult), 5e-8)
-                elif worse_loss_counter >= 151 and worse_loss_counter < 201:
-                    curr_lr = max(curr_lr * (0.99 * small_mult), 4e-8)
-                elif worse_loss_counter >= 201 and worse_loss_counter < 251:
-                    curr_lr = max(curr_lr * (0.99125 * small_mult), 3e-8)
-                elif worse_loss_counter >= 251 and worse_loss_counter < 301:
-                    curr_lr = max(curr_lr * (0.9925 * small_mult), 2e-8)
-                else:
-                    curr_lr = max(curr_lr * (0.995 * small_mult), 5e-9)
-
-                if improved and self.lr_adaptive_mode == "no-reset":
-                    worse_loss_counter = 0
-
-            pbar.set_postfix(
-                {
-                    "loss": f"{current_loss:.3e}",
-                    "best": f"{best_loss:.3e}",
-                    "lr": f"{curr_lr:.2e}",
-                    "worse_count": f"{worse_loss_counter}",
-                }
-            )
-
-            # Early stopping conditions
-            if (
-                current_loss < self.early_stop_loss
-                or curr_lr < self.early_stop_lr
-                or worse_loss_counter > self.early_stop_stall
-            ):
-                if (
-                    curr_lr < self.early_stop_lr * 1.75
-                    and worse_loss_counter > self.early_stop_stall * 0.95
-                ):
-                    print(
-                        "      - Loss has stalled and learning rate has bottomed out. Stopping."
-                    )
-                elif (
-                    current_loss < self.early_stop_loss
-                    and curr_lr < self.early_stop_lr * 1.75
-                ):
-                    print(
-                        "      - Learning Rate has bottomed out and loss is negligible. Stopping."
-                    )
-                elif (
-                    worse_loss_counter > self.early_stop_stall * 0.95
-                    and current_loss > self.early_stop_loss * 2
-                ):
-                    print("      - Loss is negligible and loss has stalled. Stopping.")
-                elif current_loss < self.early_stop_loss:
-                    print("      - Loss is negligible. Stopping.")
-                elif curr_lr < self.early_stop_lr:
-                    print("      - Learning Rate has bottomed out. Stopping.")
-                elif worse_loss_counter > self.early_stop_stall:
-                    print("      - Loss has stalled. Stopping.")
-                break
-
-            # Compute gradient for absmax update
-            # For 4-bit, we approximate: d(error)/d(absmax) ≈ sign of per-block reconstruction error
-            # If a block's reconstruction is too large, decrease its absmax; if too small, increase it
-            with torch.no_grad():
-                # Per-block error: error has shape (M, N), need to compute mean per block
-                error_flat = error.flatten()
-                n_blocks = len(absmax)
-                n_elements = n_blocks * block_size
-
-                # Reshape error to blocks (may need padding awareness)
-                if error_flat.numel() >= n_elements:
-                    error_blocked = error_flat[:n_elements].reshape(
-                        n_blocks, block_size
-                    )
-                else:
-                    # Pad if necessary
-                    pad_size = n_elements - error_flat.numel()
-                    error_flat_padded = torch.cat(
-                        [error_flat, torch.zeros(pad_size, device=error_flat.device)]
-                    )
-                    error_blocked = error_flat_padded.reshape(n_blocks, block_size)
-
-                # Get the current dequantized values in block form for sign reference
-                dequant_flat = dequant.flatten()
-                if dequant_flat.numel() >= n_elements:
-                    dequant_blocked = dequant_flat[:n_elements].reshape(
-                        n_blocks, block_size
-                    )
-                else:
-                    pad_size = n_elements - dequant_flat.numel()
-                    dequant_flat_padded = torch.cat(
-                        [
-                            dequant_flat,
-                            torch.zeros(pad_size, device=dequant_flat.device),
-                        ]
-                    )
-                    dequant_blocked = dequant_flat_padded.reshape(n_blocks, block_size)
-
-                # Gradient: if error is positive (dequant > original), we want smaller dequant
-                # dequant = codebook_val * absmax, so if codebook_val > 0, decrease absmax
-                # If codebook_val < 0, increase absmax (opposite)
-                # Simplified: grad = mean(error * sign(dequant))
-                block_grad = (error_blocked * dequant_blocked.sign()).mean(dim=1)
-
-                # Update absmax (gradient descent)
-                absmax = (absmax - curr_lr * block_grad).clamp(min=1e-8)
-
-        pbar.close()
-
-        # Return the best found
-        print(f"    - Optimization complete. Best loss: {best_loss:.6e}")
-        return best_packed, best_absmax
-
     def _convert_fp8(
         self, W_float32: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -2648,9 +2051,6 @@ def convert_to_fp8_scaled(
     calib_samples: int,
     seed: int,
     int8: bool = False,
-    nf4: bool = False,
-    fp4: bool = False,
-    af4: bool = False,
     fallback: Optional[str] = None,
     custom_layers: Optional[str] = None,
     custom_type: Optional[str] = None,
@@ -2668,26 +2068,12 @@ def convert_to_fp8_scaled(
     layer_config_fullmatch: bool = False,
     **converter_kwargs,
 ):
-    # Determine target format (priority: af4 > nf4 > fp4 > int8 > fp8)
-    if af4:
-        target_format = "af4"
-        target_dtype = torch.uint8
-        format_name = "AF4"
-    elif nf4:
-        target_format = "nf4"
-        target_dtype = torch.uint8
-        format_name = "NF4"
-    elif fp4:
-        target_format = "fp4"
-        target_dtype = torch.uint8
-        format_name = "FP4"
-    elif int8:
+    # Determine target format (priority: int8 > fp8)
+    if int8:
         target_format = "int8"
-        target_dtype = TARGET_INT8_DTYPE
         format_name = "INT8"
     else:
         target_format = "fp8"
-        target_dtype = TARGET_FP8_DTYPE
         format_name = "FP8"
 
     print(f"Processing: {input_file}\nOutput will be saved to: {output_file}")
@@ -2728,8 +2114,7 @@ def convert_to_fp8_scaled(
     converter_kwargs["target_format"] = target_format
     converter_kwargs["no_learned_rounding"] = no_learned_rounding
 
-    # Extract kernel_backend for comfy_quant format (default to 'blockwise')
-    kernel_backend = converter_kwargs.get("kernel_backend", "blockwise")
+    # Extract block_size for comfy_quant format
     block_size = converter_kwargs.get("block_size", 64)
 
     # Helper function to create converter for a specific format type
@@ -2746,10 +2131,8 @@ def convert_to_fp8_scaled(
     def get_format_info(fmt: str) -> dict:
         """Returns dtype and format name for a quantization format."""
         format_map = {
-            "nf4": {"dtype": torch.uint8, "name": "NF4", "is_4bit": True},
-            "fp4": {"dtype": torch.uint8, "name": "FP4", "is_4bit": True},
-            "int8": {"dtype": TARGET_INT8_DTYPE, "name": "INT8", "is_4bit": False},
-            "fp8": {"dtype": TARGET_FP8_DTYPE, "name": "FP8", "is_4bit": False},
+            "int8": {"dtype": TARGET_INT8_DTYPE, "name": "INT8"},
+            "fp8": {"dtype": TARGET_FP8_DTYPE, "name": "FP8"},
         }
         return format_map.get(fmt, format_map["fp8"])
 
@@ -2874,10 +2257,6 @@ def convert_to_fp8_scaled(
                     layer_format = "fp8"
                 elif fmt.startswith("int8"):
                     layer_format = "int8"
-                elif fmt == "bnb_nf4":
-                    layer_format = "nf4"
-                elif fmt == "bnb_fp4":
-                    layer_format = "fp4"
                 else:
                     layer_format = "fp8"  # fallback
 
@@ -3017,9 +2396,7 @@ def convert_to_fp8_scaled(
         else:
             converter = converters["primary"]
 
-        # Get format info for this layer
-        fmt_info = get_format_info(layer_format)
-        is_4bit = fmt_info["is_4bit"]
+        # Determine format type for this layer
         is_int8 = layer_format == "int8"
 
         q_tensor, dequant_s, dequant_w = converter.convert(original_tensor)
@@ -3037,41 +2414,13 @@ def convert_to_fp8_scaled(
                 layer_full_precision_mm = layer_settings["full_precision_matrix_mult"]
 
             # Use appropriate scale key name based on format
-            if is_4bit:
-                # 4-bit formats use absmax instead of weight_scale
-                new_tensors[f"{base_name}.absmax"] = (
-                    dequant_s.to(device="cpu", dtype=SCALE_DTYPE).detach().clone()
-                )
-                comfy_quant_tensor = create_comfy_quant_tensor(
-                    "bnb_nf4"
-                    if layer_format == "nf4"
-                    else ("bnb_af4" if layer_format == "af4" else "bnb_fp4"),
-                    block_size=layer_block_size,
-                    full_precision_matrix_mult=layer_full_precision_mm
-                    if layer_full_precision_mm
-                    else None,
-                    quant_type=layer_format,
-                    original_dtype=str(original_tensor.dtype).replace("torch.", ""),
-                    original_shape=tuple(original_tensor.shape),
-                    quant_map=get_4bit_codebook(layer_format),
-                )
-                # Add input_scale for 4-bit if requested
-                if include_input_scale:
-                    new_tensors[f"{base_name}.input_scale"] = torch.tensor(
-                        [1.0], dtype=torch.float32, device="cpu"
-                    )
-            elif is_int8:
+            if is_int8:
                 new_tensors[f"{base_name}.weight_scale"] = (
                     dequant_s.to(device="cpu", dtype=SCALE_DTYPE).detach().clone()
                 )
-                # Use int8_blockwise or int8_lodewise based on kernel_backend
-                int8_format = (
-                    "int8_lodewise"
-                    if kernel_backend == "lodewise"
-                    else "int8_blockwise"
-                )
+                # Use int8_blockwise format
                 comfy_quant_tensor = create_comfy_quant_tensor(
-                    int8_format,
+                    "int8_blockwise",
                     block_size=layer_block_size,
                     full_precision_matrix_mult=layer_full_precision_mm
                     if layer_full_precision_mm
@@ -3128,42 +2477,21 @@ def convert_to_fp8_scaled(
             )
 
         else:
-            # Non-comfy (legacy) path
-            if is_4bit:
-                # Bitsandbytes-compatible structure for 4-bit formats
-                new_tensors[f"{base_name}.absmax"] = (
-                    dequant_s.to(device="cpu", dtype=SCALE_DTYPE).detach().clone()
-                )
-                new_tensors[f"{base_name}.quant_map"] = get_4bit_codebook(
-                    layer_format
-                ).to(device="cpu", dtype=SCALE_DTYPE)
-                quant_state_dict = {
-                    "quant_type": layer_format,
-                    "blocksize": converter.block_size,
-                    "dtype": str(original_tensor.dtype).replace("torch.", ""),
-                    "shape": list(original_tensor.shape),
-                }
-                new_tensors[f"{base_name}.quant_state.bitsandbytes__{layer_format}"] = (
-                    dict_to_tensor(quant_state_dict)
-                )
-            else:
-                # FP8/INT8 legacy path
-                new_tensors[f"{base_name}.scale_weight"] = (
-                    dequant_s.to(device="cpu", dtype=SCALE_DTYPE).detach().clone()
-                )
-                # Add scale_input for non-comfy mode: use dequant_s for t5xxl/mistral, ones for others
-                if include_input_scale or t5xxl or mistral:
-                    if t5xxl or mistral:
-                        new_tensors[f"{base_name}.scale_input"] = (
-                            dequant_s.to(device="cpu", dtype=SCALE_DTYPE)
-                            .detach()
-                            .clone()
-                        )
-                    else:
-                        # Shape matches scale_weight, filled with 1.0
-                        new_tensors[f"{base_name}.scale_input"] = torch.ones_like(
-                            dequant_s, dtype=SCALE_DTYPE, device="cpu"
-                        )
+            # Non-comfy (legacy) path - FP8/INT8 only
+            new_tensors[f"{base_name}.scale_weight"] = (
+                dequant_s.to(device="cpu", dtype=SCALE_DTYPE).detach().clone()
+            )
+            # Add scale_input for non-comfy mode: use dequant_s for t5xxl/mistral, ones for others
+            if include_input_scale or t5xxl or mistral:
+                if t5xxl or mistral:
+                    new_tensors[f"{base_name}.scale_input"] = (
+                        dequant_s.to(device="cpu", dtype=SCALE_DTYPE).detach().clone()
+                    )
+                else:
+                    # Shape matches scale_weight, filled with 1.0
+                    new_tensors[f"{base_name}.scale_input"] = torch.ones_like(
+                        dequant_s, dtype=SCALE_DTYPE, device="cpu"
+                    )
 
         # Determine if this layer uses simple mode (skip bias correction to save memory)
         layer_uses_simple = (
@@ -3728,7 +3056,6 @@ def convert_int8_to_comfy_quant(
     input_file: str,
     output_file: str,
     block_size: int = 128,
-    kernel_backend: str = "blockwise",
     include_input_scale: bool = False,
 ):
     """
@@ -3742,21 +3069,12 @@ def convert_int8_to_comfy_quant(
         input_file: Path to input INT8 safetensors file
         output_file: Path to output comfy_quant safetensors file
         block_size: Block size to use in comfy_quant metadata (default 128)
-        kernel_backend: "blockwise" or "lodewise" for INT8 format type
         include_input_scale: If True, add input_scale tensor (1.0 fp32) when missing
     """
-    print("Converting INT8 legacy format to comfy_quant format")
-    print(f"Input: {input_file}")
-    print(f"Output: {output_file}")
-    print(f"Block size: {block_size}")
-    print(f"Kernel backend: {kernel_backend}")
+    print(f"Converting INT8 model to comfy_quant format: {input_file}")
     print("-" * 60)
-
-    # Determine INT8 format type - only use CLI if explicitly specified (non-default)
-    cli_format_explicit = (
-        kernel_backend != "blockwise"
-    )  # User explicitly chose a format
-    int8_format = "int8_lodewise" if kernel_backend == "lodewise" else "int8_blockwise"
+    print(f"Block size: {block_size}")
+    print("-" * 60)
 
     # Load input tensors
     tensors: Dict[str, torch.Tensor] = {}
@@ -3855,66 +3173,34 @@ def convert_int8_to_comfy_quant(
                 # Detect INT8 format and block_size from weight_scale shape
                 # Scale shape conventions from quant_ops.py layouts:
                 # - BlockWiseINT8Layout: (M//bs, N//bs) - 2D block grid
-                # - BlockWiseINT8LayoutLodeWise: (N, K//bs) - per-output-row blocking
                 M, K = weight.shape[0], weight.shape[1] if weight.ndim >= 2 else 1
 
+                detected_format = "int8_blockwise"
                 if weight_scale is None:
-                    detected_format = (
-                        int8_format if cli_format_explicit else "int8_blockwise"
-                    )
                     detected_block_size = block_size
-                    if cli_format_explicit:
-                        print(
-                            f"    → Format: {detected_format} (no scale, using CLI-specified format)"
-                        )
-                    else:
-                        print(
-                            f"    → Format: {detected_format} (no scale, assumed blockwise)"
-                        )
+                    print(
+                        f"    → Format: {detected_format} (no scale, assumed blockwise)"
+                    )
                 elif weight_scale.ndim == 2:
                     scale_dim0, scale_dim1 = weight_scale.shape
-                    # Check if it's lodewise: (N, K//bs) where N == M (output features)
-                    if scale_dim0 == M and K % scale_dim1 == 0:
-                        detected_format = "int8_lodewise"
-                        detected_block_size = K // scale_dim1
-                        print(
-                            f"    → Format: {detected_format} (scale shape={weight_scale.shape}, bs={detected_block_size})"
-                        )
                     # Check if it's blockwise: (M//bs, N//bs)
-                    elif M % scale_dim0 == 0 and K % scale_dim1 == 0:
+                    if M % scale_dim0 == 0 and K % scale_dim1 == 0:
                         bs_M = M // scale_dim0
                         bs_K = K // scale_dim1
-                        detected_format = "int8_blockwise"
                         detected_block_size = bs_M if bs_M == bs_K else min(bs_M, bs_K)
                         print(
                             f"    → Format: {detected_format} (scale shape={weight_scale.shape}, bs={detected_block_size})"
                         )
                     else:
-                        detected_format = (
-                            int8_format if cli_format_explicit else "int8_blockwise"
-                        )
                         detected_block_size = block_size
-                        if cli_format_explicit:
-                            print(
-                                f"    → Format: {detected_format} (scale 2D, cannot identify - using CLI-specified)"
-                            )
-                        else:
-                            print(
-                                f"    → Format: {detected_format} (scale 2D, cannot identify layout)"
-                            )
+                        print(
+                            f"    → Format: {detected_format} (scale 2D, cannot identify layout)"
+                        )
                 else:
-                    detected_format = (
-                        int8_format if cli_format_explicit else "int8_blockwise"
-                    )
                     detected_block_size = block_size
-                    if cli_format_explicit:
-                        print(
-                            f"    → Format: {detected_format} (scale ndim={weight_scale.ndim}, using CLI-specified)"
-                        )
-                    else:
-                        print(
-                            f"    → Format: {detected_format} (scale ndim={weight_scale.ndim}, assumed blockwise)"
-                        )
+                    print(
+                        f"    → Format: {detected_format} (scale ndim={weight_scale.ndim}, assumed blockwise)"
+                    )
 
                 # Check if .comfy_quant already exists in other_tensors
                 if f"{base_name}.comfy_quant" not in other_tensors:
@@ -3946,66 +3232,34 @@ def convert_int8_to_comfy_quant(
                 # Detect INT8 format and block_size from scale_weight shape
                 # Scale shape conventions from quant_ops.py layouts:
                 # - BlockWiseINT8Layout: (M//bs, N//bs) - 2D block grid
-                # - BlockWiseINT8LayoutLodeWise: (N, K//bs) - per-output-row blocking
                 M, K = weight.shape[0], weight.shape[1] if weight.ndim >= 2 else 1
 
+                detected_format = "int8_blockwise"
                 if scale_weight is None:
-                    detected_format = (
-                        int8_format if cli_format_explicit else "int8_blockwise"
-                    )
                     detected_block_size = block_size
-                    if cli_format_explicit:
-                        print(
-                            f"    → Format: {detected_format} (no scale, using CLI-specified format)"
-                        )
-                    else:
-                        print(
-                            f"    → Format: {detected_format} (no scale, assumed blockwise)"
-                        )
+                    print(
+                        f"    → Format: {detected_format} (no scale, assumed blockwise)"
+                    )
                 elif scale_weight.ndim == 2:
                     scale_dim0, scale_dim1 = scale_weight.shape
-                    # Check if it's lodewise: (N, K//bs) where N == M (output features)
-                    if scale_dim0 == M and K % scale_dim1 == 0:
-                        detected_format = "int8_lodewise"
-                        detected_block_size = K // scale_dim1
-                        print(
-                            f"    → Format: {detected_format} (scale shape={scale_weight.shape}, bs={detected_block_size})"
-                        )
                     # Check if it's blockwise: (M//bs, N//bs)
-                    elif M % scale_dim0 == 0 and K % scale_dim1 == 0:
+                    if M % scale_dim0 == 0 and K % scale_dim1 == 0:
                         bs_M = M // scale_dim0
                         bs_K = K // scale_dim1
-                        detected_format = "int8_blockwise"
                         detected_block_size = bs_M if bs_M == bs_K else min(bs_M, bs_K)
                         print(
                             f"    → Format: {detected_format} (scale shape={scale_weight.shape}, bs={detected_block_size})"
                         )
                     else:
-                        detected_format = (
-                            int8_format if cli_format_explicit else "int8_blockwise"
-                        )
                         detected_block_size = block_size
-                        if cli_format_explicit:
-                            print(
-                                f"    → Format: {detected_format} (scale 2D, cannot identify - using CLI-specified)"
-                            )
-                        else:
-                            print(
-                                f"    → Format: {detected_format} (scale 2D, cannot identify layout)"
-                            )
+                        print(
+                            f"    → Format: {detected_format} (scale 2D, cannot identify layout)"
+                        )
                 else:
-                    detected_format = (
-                        int8_format if cli_format_explicit else "int8_blockwise"
-                    )
                     detected_block_size = block_size
-                    if cli_format_explicit:
-                        print(
-                            f"    → Format: {detected_format} (scale ndim={scale_weight.ndim}, using CLI-specified)"
-                        )
-                    else:
-                        print(
-                            f"    → Format: {detected_format} (scale ndim={scale_weight.ndim}, assumed blockwise)"
-                        )
+                    print(
+                        f"    → Format: {detected_format} (scale ndim={scale_weight.ndim}, assumed blockwise)"
+                    )
 
                 # Create .comfy_quant metadata
                 detected_formats[detected_format] = (
@@ -4057,8 +3311,8 @@ def convert_int8_to_comfy_quant(
         for fmt, count in sorted(detected_formats.items(), key=lambda x: -x[1]):
             print(f"    {fmt}: {count} layers")
     else:
-        print(f"  INT8 format (CLI):     {int8_format}")
-        print(f"  Block size (CLI):      {block_size}")
+        print(f"  INT8 format (CLI):     {detected_format}")
+        print(f"  Block size (CLI):      {detected_block_size}")
     if fixed_comfy_quant_count > 0:
         print(
             f"  Fixed comfy_quant:     {fixed_comfy_quant_count} (nested params → flat)"
@@ -4084,9 +3338,6 @@ def convert_int8_to_comfy_quant(
 
 EXPERIMENTAL_ARGS = {
     "int8",
-    "nf4",
-    "fp4",
-    "af4",
     "fallback",
     "custom_layers",
     "custom_type",
@@ -4096,7 +3347,6 @@ EXPERIMENTAL_ARGS = {
     "custom_heur",
     "fallback_block_size",
     "fallback_simple",
-    "kernel_backend",
     "heur",
     "scaling_mode",
     "block_size",
@@ -4211,12 +3461,9 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
 
         format_args = [
             "int8",
-            "nf4",
-            "fp4",
             "fallback",
             "block_size",
             "scaling_mode",
-            "kernel_backend",
         ]
         for action in self._all_actions:
             if self._get_dest_name(action) in format_args:
@@ -4393,7 +3640,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
             "  --help-experimental, -he    Show experimental quantization options"
         )
         formatter.add_text(
-            "                              (int8, nf4, fp4, custom-layers, scaling_mode, etc.)"
+            "                              (int8, custom-layers, scaling_mode, etc.)"
         )
         formatter.add_text(
             "  --help-filters, -hf         Show model-specific exclusion filters"
@@ -4419,7 +3666,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Convert safetensors weights to Scaled FP8 format.\n\n"
         "Default behavior: FP8 quantization with per-tensor scaling.\n"
-        "For INT8/NF4/FP4 and other experimental options, see --help-experimental.\n"
+        "For INT8 and other experimental options, see --help-experimental.\n"
         "For model-specific layer exclusions, see --help-filters.\n"
         "For advanced LR tuning and early stopping, see --help-advanced.",
         experimental_args=EXPERIMENTAL_ARGS,
@@ -4444,23 +3691,10 @@ def main():
         help="Use INT8 block-wise quantization instead of FP8.",
     )
     parser.add_argument(
-        "--nf4", action="store_true", help="Use NF4 (4-bit Normal Float) quantization."
-    )
-    parser.add_argument(
-        "--fp4",
-        action="store_true",
-        help="Use FP4 (4-bit Floating Point) quantization.",
-    )
-    parser.add_argument(
-        "--af4",
-        action="store_true",
-        help="Use AF4 (AbnormalFloat4) quantization. Optimized for block_size=64.",
-    )
-    parser.add_argument(
         "--fallback",
         type=str,
         default=None,
-        choices=["fp8", "int8", "nf4", "fp4", "af4"],
+        choices=["fp8", "int8"],
         help="Fallback quantization type for excluded layers (instead of keeping original precision).",
     )
     parser.add_argument(
@@ -4475,7 +3709,7 @@ def main():
         type=str,
         default=None,
         dest="custom_type",
-        choices=["fp8", "int8", "nf4", "fp4"],
+        choices=["fp8", "int8"],
         help="Quantization type for custom layer matches.",
     )
     # Custom-type parameter overrides
@@ -4519,13 +3753,6 @@ def main():
         action="store_true",
         dest="fallback_simple",
         help="Use simple quantization for fallback-type layers",
-    )
-    parser.add_argument(
-        "--kernel_backend",
-        type=str,
-        default="blockwise",
-        choices=["blockwise", "lodewise"],
-        help="Kernel backend for INT8 quantization. 'blockwise' uses BlockWiseINT8Layout (2D tile-level scales), 'lodewise' uses Lode-Wise kernels (per-output-lane scales).",
     )
     parser.add_argument(
         "--simple",
@@ -4615,7 +3842,7 @@ def main():
         "--block_size",
         type=int,
         default=None,
-        help="Block size for block-wise quantization (REQUIRED for INT8, NF4, FP4). Common values: 64, 128.",
+        help="Block size for block-wise quantization (REQUIRED for INT8). Common values: 64, 128.",
     )
     parser.add_argument(
         "--calib_samples",
@@ -4897,15 +4124,11 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
 
         # Use block_size from args or default to 128
         int8_block_size = args.block_size if args.block_size else 128
-        int8_kernel_backend = (
-            args.kernel_backend if hasattr(args, "kernel_backend") else "blockwise"
-        )
 
         convert_int8_to_comfy_quant(
             args.input,
             args.output,
             block_size=int8_block_size,
-            kernel_backend=int8_kernel_backend,
             include_input_scale=args.input_scale,
         )
         return
@@ -4964,16 +4187,13 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
         return
 
     # Determine which formats require block_size
-    primary_needs_block_size = args.int8 or args.nf4 or args.fp4 or args.af4
-    custom_needs_block_size = args.custom_type in ("int8", "nf4", "fp4", "af4")
-    fallback_needs_block_size = args.fallback in ("int8", "nf4", "fp4", "af4")
+    primary_needs_block_size = args.int8
+    custom_needs_block_size = args.custom_type == "int8"
+    fallback_needs_block_size = args.fallback == "int8"
 
     # Validate block_size for primary format
     if primary_needs_block_size and args.block_size is None:
-        format_name = (
-            "INT8" if args.int8 else "NF4" if args.nf4 else "FP4" if args.fp4 else "AF4"
-        )
-        print(f"Error: --block_size is required when using {format_name} quantization.")
+        print("Error: --block_size is required when using INT8 quantization.")
         print("       Example: --block_size 128")
         sys.exit(1)
 
@@ -5004,16 +4224,6 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
         )
         args.comfy_quant = True
 
-    # Check lodewise kernel backend availability
-    if args.kernel_backend == "lodewise" and not _HAS_LODEWISE:
-        print("ERROR: lodewise kernel backend requested but not available.")
-        print("       The kernels/int8_matmul.py module could not be imported.")
-        print("")
-        print(
-            "Fallback command: Remove '--kernel_backend lodewise' or use '--kernel_backend blockwise'"
-        )
-        sys.exit(1)
-
     # Only check FP8 support if not using INT8
     if not args.int8:
         try:
@@ -5030,13 +4240,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
 
     if not args.output:
         base = os.path.splitext(args.input)[0]
-        if args.nf4:
-            format_str = "bnb_nf4"
-            scaling_str = f"_bs{args.block_size}"
-        elif args.fp4:
-            format_str = "bnb_fp4"
-            scaling_str = f"_bs{args.block_size}"
-        elif args.int8:
+        if args.int8:
             format_str = "int8_blockwise"
             scaling_str = f"_bs{args.block_size}"
         else:
@@ -5090,9 +4294,6 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
         "calib_samples",
         "manual_seed",
         "int8",
-        "nf4",
-        "fp4",
-        "af4",
         "fallback",
         "custom_layers",
         "custom_type",
@@ -5136,9 +4337,6 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
         args.calib_samples,
         seed,
         int8=args.int8,
-        nf4=args.nf4,
-        fp4=args.fp4,
-        af4=args.af4,
         fallback=args.fallback,
         custom_layers=args.custom_layers,
         custom_type=args.custom_type,

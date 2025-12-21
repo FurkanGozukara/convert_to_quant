@@ -1,6 +1,6 @@
 # convert_to_quant
 
-**Convert safetensors weights to quantized formats (FP8, INT8, NF4, FP4) with learned rounding optimization for ComfyUI inference.**
+**Convert safetensors weights to quantized formats (FP8, INT8) with learned rounding optimization for ComfyUI inference.**
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -125,7 +125,6 @@ convert_to_quant/
 │   └── comfy/                   # ComfyUI-compatible components
 │       ├── quant_ops.py         # Layout system & QuantizedTensor
 │       ├── int8_kernels.py      # INT8 Triton kernels
-│       ├── nf4_kernels.py       # NF4/FP4 kernels
 │       └── float.py             # FP8 utilities
 ├── pyproject.toml               # Package configuration
 ├── MANUAL.md                    # User documentation
@@ -190,15 +189,10 @@ These formats are experimental and accessed via `--help-experimental`:
 | Format | Flag | Notes |
 |--------|------|-------|
 | INT8 Block-wise | `--int8` | Good balance of quality/speed |
-| NF4 4-bit | `--nf4` | Maximum compression |
-| FP4 4-bit | `--fp4` | Highly experimental |
 
 ```bash
 # INT8 with performance heuristics
 convert_to_quant -i model.safetensors --int8 --block_size 128 --comfy_quant --heur
-
-# NF4 4-bit quantization
-convert_to_quant -i model.safetensors --nf4 --block_size 64 --comfy_quant
 ```
 
 ## Requirements
