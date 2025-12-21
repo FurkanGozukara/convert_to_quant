@@ -483,7 +483,7 @@ class TensorCoreFP8Layout(QuantizedLayout):
             scale = torch.ones((), device=tensor.device, dtype=torch.float32)
 
         if stochastic_rounding > 0:
-            tensor = comfy.float.stochastic_rounding(
+            tensor = comfy_float.stochastic_rounding(
                 tensor, dtype=dtype, seed=stochastic_rounding
             )
         else:
@@ -1065,7 +1065,6 @@ class BlockWiseINT8LayoutLodeWise(QuantizedLayout):
         else:
             # Activation quantization (same as BlockWiseINT8Layout)
             K = tensor.shape[-1]
-            batch_shape = tensor.shape[:-1]
             assert (
                 K % block_size == 0
             ), f"Last dimension must be divisible by block_size={block_size}, got {K}"
@@ -1697,7 +1696,7 @@ def _int8_gemm_triton_or_fallback(
                 fallback_output, block_size=block_size
             )
             return output_int8, output_scale
-        except:
+        except Exception:
             # Fallback to CPU quantization if Triton not available
             output_int8, output_scale = (
                 BlockWiseINT8Layout._activation_quantize_pytorch(
