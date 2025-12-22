@@ -2064,6 +2064,7 @@ def convert_to_fp8_scaled(
     skip_inefficient_layers: bool = False,
     include_input_scale: bool = False,
     no_learned_rounding: bool = False,
+    save_quant_metadata: bool = False,
     layer_config: Optional[Dict[str, Any]] = None,
     layer_config_fullmatch: bool = False,
     **converter_kwargs,
@@ -2109,6 +2110,9 @@ def convert_to_fp8_scaled(
     except Exception as e:
         print(f"FATAL: Error loading '{input_file}': {e}")
         return
+
+    # Initialize metadata collection if enabled
+    quant_metadata_layers = {} if save_quant_metadata else None
 
     # Add target_format and no_learned_rounding to converter kwargs
     converter_kwargs["target_format"] = target_format
@@ -2413,11 +2417,17 @@ def convert_to_fp8_scaled(
             if use_layer_config and "full_precision_matrix_mult" in layer_settings:
                 layer_full_precision_mm = layer_settings["full_precision_matrix_mult"]
 
+            # Variables for metadata collection
+            comfy_quant_format = None
+            block_size_for_meta = None
+
             # Use appropriate scale key name based on format
             if is_int8:
                 new_tensors[f"{base_name}.weight_scale"] = (
                     dequant_s.to(device="cpu", dtype=SCALE_DTYPE).detach().clone()
                 )
+                comfy_quant_format = "int8_blockwise"
+                block_size_for_meta = layer_block_size
                 # Use int8_blockwise format
                 comfy_quant_tensor = create_comfy_quant_tensor(
                     "int8_blockwise",
@@ -2453,6 +2463,9 @@ def convert_to_fp8_scaled(
                     fp8_format = "float8_e4m3fn"
                     fp8_block_size = None
 
+                comfy_quant_format = fp8_format
+                block_size_for_meta = fp8_block_size
+
                 comfy_quant_tensor = create_comfy_quant_tensor(
                     fp8_format,
                     block_size=fp8_block_size,
@@ -2475,6 +2488,21 @@ def convert_to_fp8_scaled(
             new_tensors[f"{base_name}.comfy_quant"] = comfy_quant_tensor.to(
                 device="cpu"
             )
+
+            # Collect metadata if enabled
+            if save_quant_metadata:
+                # Reconstruct the dict that was used to create the tensor
+                meta_entry = {"format": comfy_quant_format}
+                block_based_formats = {"int8_blockwise", "float8_e4m3fn_blockwise"}
+                if (
+                    block_size_for_meta is not None
+                    and comfy_quant_format in block_based_formats
+                ):
+                    meta_entry["group_size"] = block_size_for_meta
+                if layer_full_precision_mm:
+                    meta_entry["full_precision_matrix_mult"] = True
+
+                quant_metadata_layers[base_name] = meta_entry
 
         else:
             # Non-comfy (legacy) path - FP8/INT8 only
@@ -2597,7 +2625,19 @@ def convert_to_fp8_scaled(
     print(f"Saving {len(new_tensors)} tensors to {output_file}")
     try:
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
-        save_file(new_tensors, output_file)
+
+        # Prepare metadata args
+        save_kwargs = {}
+        if save_quant_metadata and quant_metadata_layers:
+            full_metadata = {"format_version": "1.0", "layers": quant_metadata_layers}
+            save_kwargs["metadata"] = {
+                "_quantization_metadata": json.dumps(full_metadata)
+            }
+            print(
+                f"  Adding quantization metadata for {len(quant_metadata_layers)} layers"
+            )
+
+        save_file(new_tensors, output_file, **save_kwargs)
         print("Conversion complete!")
     except Exception as e:
         print(f"FATAL: Error saving file '{output_file}': {e}")
@@ -4006,6 +4046,14 @@ def main():
         help="Add .scale_input tensors to legacy fp8_scaled models (keeps legacy format, adds missing input scales)",
     )
 
+    # Metadata saving option
+    parser.add_argument(
+        "--save-quant-metadata",
+        action="store_true",
+        dest="save_quant_metadata",
+        help="Save quantization metadata in safetensors header (under _quantization_metadata key)",
+    )
+
     # ComfyQuant layer config editing mode
     parser.add_argument(
         "--edit-quant",
@@ -4309,6 +4357,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
         "simple",
         "layer_config",
         "layer_config_fullmatch",
+        "save_quant_metadata",
     ]
     converter_kwargs = {k: v for k, v in vars(args).items() if k not in excluded_keys}
 
@@ -4352,6 +4401,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
         no_learned_rounding=args.simple,
         layer_config=layer_config_data,
         layer_config_fullmatch=args.layer_config_fullmatch,
+        save_quant_metadata=args.save_quant_metadata,
         **converter_kwargs,
     )
 
