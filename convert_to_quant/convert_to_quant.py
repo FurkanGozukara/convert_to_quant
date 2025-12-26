@@ -176,6 +176,36 @@ VALID_QUANT_FORMATS = {
 }
 
 
+def normalize_tensorwise_scales(
+    tensors: Dict[str, torch.Tensor],
+) -> Tuple[Dict[str, torch.Tensor], int]:
+    """
+    Normalize 1-element scale tensors to scalars in-place.
+
+    Tensorwise quantization should use scalar scales, not 1-element arrays.
+    This ensures consistency with ComfyUI loader expectations.
+
+    Args:
+        tensors: Dictionary of tensors to normalize (modified in-place)
+
+    Returns:
+        Tuple of (tensors dict, count of normalized tensors)
+    """
+    normalized_count = 0
+    scale_suffixes = (".input_scale", ".weight_scale", ".scale_input", ".scale_weight")
+
+    for key in list(tensors.keys()):
+        if any(key.endswith(suffix) for suffix in scale_suffixes):
+            tensor = tensors[key]
+            # Only normalize if it's a 1-element array (shape like (1,) or (1,1))
+            if tensor.numel() == 1 and tensor.ndim > 0:
+                tensors[key] = tensor.squeeze()  # Convert to scalar
+                normalized_count += 1
+
+    return tensors, normalized_count
+
+
+
 def pattern_specificity(pattern: str) -> tuple:
     """
     Calculate specificity score for a regex pattern.
@@ -546,6 +576,7 @@ def edit_comfy_quant(
     remove_keys: Optional[List[str]] = None,
     add_keys_str: Optional[str] = None,
     layer_filter: Optional[str] = None,
+    save_quant_metadata: bool = False,
 ):
     """
     Edit comfy_quant layer configurations and _quantization_metadata in a model.
@@ -738,6 +769,34 @@ def edit_comfy_quant(
         print("-" * 60)
         print("Note: No _quantization_metadata header found in input file")
 
+    # Generate metadata from .comfy_quant tensors if requested
+    if save_quant_metadata:
+        print("-" * 60)
+        print("Generating _quantization_metadata from .comfy_quant tensors...")
+        generated_layers = {}
+        for key in tensors.keys():
+            if not key.endswith(".comfy_quant"):
+                continue
+            base_name = key[:-12]  # Remove '.comfy_quant' suffix
+            try:
+                config = tensor_to_dict(tensors[key])
+                # Build metadata entry from config
+                meta_entry = {"format": config.get("format", "unknown")}
+                if "group_size" in config:
+                    meta_entry["group_size"] = config["group_size"]
+                if config.get("full_precision_matrix_mult"):
+                    meta_entry["full_precision_matrix_mult"] = True
+                generated_layers[base_name] = meta_entry
+            except Exception as e:
+                print(f"  WARNING: Failed to parse {key}: {e}")
+        
+        if generated_layers:
+            quant_metadata = {"format_version": "1.0", "layers": generated_layers}
+            quant_metadata_modified = True
+            print(f"  Generated metadata for {len(generated_layers)} layers")
+        else:
+            print("  No .comfy_quant tensors found to generate metadata from")
+
     print("-" * 60)
 
     # Prepare save kwargs with updated metadata
@@ -763,7 +822,12 @@ def edit_comfy_quant(
             os.path.dirname(output_file) if os.path.dirname(output_file) else ".",
             exist_ok=True,
         )
+        # Normalize any 1-element scale tensors to scalars
+        tensors, normalized_count = normalize_tensorwise_scales(tensors)
+        if normalized_count > 0:
+            print(f"  Normalized {normalized_count} scale tensors to scalars")
         save_file(tensors, output_file, **save_kwargs)
+
         print("Edit complete!")
     except Exception as e:
         print(f"FATAL: Error saving file '{output_file}': {e}")
@@ -2900,7 +2964,12 @@ def convert_to_fp8_scaled(
                 f"  Adding quantization metadata for {len(quant_metadata_layers)} layers"
             )
 
+        # Normalize any 1-element scale tensors to scalars
+        new_tensors, normalized_count = normalize_tensorwise_scales(new_tensors)
+        if normalized_count > 0:
+            print(f"  Normalized {normalized_count} scale tensors to scalars")
         save_file(new_tensors, output_file, **save_kwargs)
+
         print("Conversion complete!")
     except Exception as e:
         print(f"FATAL: Error saving file '{output_file}': {e}")
@@ -3263,7 +3332,12 @@ def convert_fp8_scaled_to_comfy_quant(
                 f"  Adding quantization metadata for {len(quant_metadata_layers)} layers"
             )
 
+        # Normalize any 1-element scale tensors to scalars
+        output_tensors, normalized_count = normalize_tensorwise_scales(output_tensors)
+        if normalized_count > 0:
+            print(f"  Normalized {normalized_count} scale tensors to scalars")
         save_file(output_tensors, output_file, **save_kwargs)
+
         print("Conversion complete!")
     except Exception as e:
         print(f"FATAL: Error saving file '{output_file}': {e}")
@@ -3375,7 +3449,12 @@ def add_legacy_input_scale(
             os.path.dirname(output_file) if os.path.dirname(output_file) else ".",
             exist_ok=True,
         )
+        # Normalize any 1-element scale tensors to scalars
+        output_tensors, normalized_count = normalize_tensorwise_scales(output_tensors)
+        if normalized_count > 0:
+            print(f"  Normalized {normalized_count} scale tensors to scalars")
         save_file(output_tensors, output_file)
+
         print("Conversion complete!")
     except Exception as e:
         print(f"FATAL: Error saving file '{output_file}': {e}")
@@ -3677,7 +3756,12 @@ def convert_int8_to_comfy_quant(
             os.path.dirname(output_file) if os.path.dirname(output_file) else ".",
             exist_ok=True,
         )
+        # Normalize any 1-element scale tensors to scalars
+        output_tensors, normalized_count = normalize_tensorwise_scales(output_tensors)
+        if normalized_count > 0:
+            print(f"  Normalized {normalized_count} scale tensors to scalars")
         save_file(output_tensors, output_file)
+
         print("Conversion complete!")
     except Exception as e:
         print(f"FATAL: Error saving file '{output_file}': {e}")
@@ -4524,9 +4608,9 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             print("Error: Output file cannot be same as input.")
             return
 
-        if not args.remove_keys and not args.add_keys:
+        if not args.remove_keys and not args.add_keys and not args.save_quant_metadata:
             print(
-                "Error: --edit-quant requires at least one of --remove-keys or --add-keys"
+                "Error: --edit-quant requires at least one of --remove-keys, --add-keys, or --save-quant-metadata"
             )
             return
 
@@ -4543,6 +4627,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             remove_keys=remove_keys_list,
             add_keys_str=args.add_keys,
             layer_filter=args.quant_filter,
+            save_quant_metadata=args.save_quant_metadata,
         )
         return
 

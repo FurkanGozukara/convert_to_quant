@@ -1,5 +1,40 @@
 # Development Log
 
+## 2025-12-26: Tensorwise Scale Normalization & Metadata Generation
+
+### Session Summary
+1. Added centralized `normalize_tensorwise_scales()` helper to ensure all tensorwise scale tensors are saved as proper scalars instead of 1-element arrays. Applied to all 5 editing/conversion functions.
+2. Extended `--edit-quant` to support `--save-quant-metadata` for generating `_quantization_metadata` header from existing `.comfy_quant` tensors.
+
+---
+
+### Changes
+
+| Feature | Description |
+|---------|-------------|
+| `normalize_tensorwise_scales()` | Normalizes `numel==1` scale tensors to scalars before save |
+| `--edit-quant --save-quant-metadata` | Generates metadata header from existing `.comfy_quant` tensors |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `convert_to_quant/convert_to_quant.py` | Added `normalize_tensorwise_scales()` (~line 179); updated 5 save points; added `save_quant_metadata` param to `edit_comfy_quant()` |
+
+### Usage
+
+```bash
+# Fix 1-element scale arrays and generate metadata header
+convert_to_quant -i model.safetensors --edit-quant --save-quant-metadata -o fixed.safetensors
+```
+
+### Verification
+
+- Syntax check: ✅ Passed
+
+---
+
+
 ## 2025-12-24: Edit-Quant Metadata Sync
 
 ### Session Summary
