@@ -1,5 +1,45 @@
 # Development Log
 
+## 2025-12-28: Legacy FP8 Cleanup Mode
+
+### Session Summary
+Added `--cleanup-fp8-scaled` mode to clean up legacy fp8_scaled models without converting to comfy_quant format.
+
+---
+
+### New CLI Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--cleanup-fp8-scaled` | Enable cleanup mode |
+| `--scaled-fp8-marker {0,2}` | Set `scaled_fp8` to `empty((0))` or `empty((2))` |
+
+### Features
+
+- Sets `scaled_fp8` marker to specified size
+- Removes orphaned scale_weight/scale_input (where weight is NOT FP8)
+- Optionally adds missing `.scale_input` for FP8 layers (via `--input_scale`)
+- Normalizes 1-element scales to scalars
+- Keeps legacy format (no comfy_quant, no metadata)
+
+### Usage
+
+```bash
+# Basic cleanup
+convert_to_quant -i model.safetensors --cleanup-fp8-scaled -o cleaned.safetensors
+
+# With marker size 2 and adding missing scale_input
+convert_to_quant -i model.safetensors --cleanup-fp8-scaled --scaled-fp8-marker 2 --input_scale -o cleaned.safetensors
+```
+
+
+### Verification
+
+- Syntax check: ✅ Passed
+
+---
+
+
 ## 2025-12-26: Tensorwise Scale Normalization & Metadata Generation
 
 ### Session Summary

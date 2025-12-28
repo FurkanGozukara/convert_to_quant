@@ -3465,6 +3465,146 @@ def add_legacy_input_scale(
         return
 
 
+def cleanup_fp8_scaled(
+    input_file: str,
+    output_file: str,
+    marker_size: int = 0,
+    add_scale_input: bool = False,
+):
+    """
+    Clean up legacy fp8_scaled models.
+
+    This modifies a legacy fp8_scaled model to:
+    - Set scaled_fp8 marker to empty((marker_size)) where marker_size is 0 or 2
+    - Remove orphaned scale_weight/scale_input tensors (where weight is NOT FP8)
+    - Optionally add missing .scale_input tensors for FP8 layers
+    - Normalize 1-element scale tensors to scalars
+    - Keep legacy format (no comfy_quant, no metadata)
+
+    Args:
+        input_file: Path to input fp8_scaled safetensors file
+        output_file: Path to output safetensors file
+        marker_size: Size of scaled_fp8 marker tensor (0 or 2)
+        add_scale_input: If True, add .scale_input = 1.0 for FP8 layers missing it
+    """
+    print("Cleaning up legacy fp8_scaled model")
+    print(f"Input: {input_file}")
+    print(f"Output: {output_file}")
+    print(f"scaled_fp8 marker size: {marker_size}")
+    if add_scale_input:
+        print("Adding missing scale_input: Yes")
+    print("-" * 60)
+
+    # Load input tensors
+    tensors: Dict[str, torch.Tensor] = {}
+    try:
+        with safe_open(input_file, framework="pt", device="cpu") as f:
+            print(f"Loading {len(f.keys())} tensors from source file...")
+            for key in tqdm(f.keys(), desc="Loading tensors"):
+                tensors[key] = f.get_tensor(key)
+    except Exception as e:
+        print(f"FATAL: Error loading '{input_file}': {e}")
+        return
+
+    # Build map of weight keys to their dtypes
+    weight_dtypes: Dict[str, torch.dtype] = {}
+    for key in tensors.keys():
+        if key.endswith(".weight"):
+            base_name = key[:-7]  # Remove '.weight'
+            weight_dtypes[base_name] = tensors[key].dtype
+
+    # Process tensors
+    output_tensors: Dict[str, torch.Tensor] = {}
+    removed_scale_weight = 0
+    removed_scale_input = 0
+    kept_scale_weight = 0
+    kept_scale_input = 0
+
+    for key, tensor in tensors.items():
+        # Handle scaled_fp8 marker
+        if key == "scaled_fp8":
+            output_tensors[key] = torch.empty((marker_size,), dtype=TARGET_FP8_DTYPE)
+            print(f"  Set scaled_fp8 marker to empty(({marker_size}))")
+            continue
+
+        # Check if this is a scale tensor
+        if key.endswith(".scale_weight"):
+            base_name = key[:-13]  # Remove '.scale_weight'
+            if base_name in weight_dtypes:
+                if weight_dtypes[base_name] == TARGET_FP8_DTYPE:
+                    output_tensors[key] = tensor
+                    kept_scale_weight += 1
+                else:
+                    removed_scale_weight += 1
+                    print(f"  Removing orphaned: {key} (weight is {weight_dtypes[base_name]})")
+            else:
+                removed_scale_weight += 1
+                print(f"  Removing orphaned: {key} (no weight found)")
+            continue
+
+        if key.endswith(".scale_input"):
+            base_name = key[:-12]  # Remove '.scale_input'
+            if base_name in weight_dtypes:
+                if weight_dtypes[base_name] == TARGET_FP8_DTYPE:
+                    output_tensors[key] = tensor
+                    kept_scale_input += 1
+                else:
+                    removed_scale_input += 1
+                    print(f"  Removing orphaned: {key} (weight is {weight_dtypes[base_name]})")
+            else:
+                removed_scale_input += 1
+                print(f"  Removing orphaned: {key} (no weight found)")
+            continue
+
+        # Keep all other tensors
+        output_tensors[key] = tensor
+
+    # Add missing scale_input tensors for FP8 layers if requested
+    added_scale_input = 0
+    if add_scale_input:
+        for base_name, dtype in weight_dtypes.items():
+            if dtype == TARGET_FP8_DTYPE:
+                scale_input_key = f"{base_name}.scale_input"
+                if scale_input_key not in output_tensors:
+                    output_tensors[scale_input_key] = torch.tensor(1.0, dtype=torch.float32)
+                    added_scale_input += 1
+
+    # Summary
+    print("\n" + "-" * 60)
+    print("Cleanup Summary:")
+    print(f"  Total tensors input:      {len(tensors)}")
+    print(f"  Total tensors output:     {len(output_tensors)}")
+    if kept_scale_weight > 0:
+        print(f"  scale_weight kept:        {kept_scale_weight}")
+    if kept_scale_input > 0:
+        print(f"  scale_input kept:         {kept_scale_input}")
+    if added_scale_input > 0:
+        print(f"  scale_input added:        {added_scale_input}")
+    if removed_scale_weight > 0:
+        print(f"  scale_weight removed:     {removed_scale_weight}")
+    if removed_scale_input > 0:
+        print(f"  scale_input removed:      {removed_scale_input}")
+    print("-" * 60)
+
+    # Save output
+    print(f"\nSaving to {output_file}...")
+    try:
+        os.makedirs(
+            os.path.dirname(output_file) if os.path.dirname(output_file) else ".",
+            exist_ok=True,
+        )
+        # Normalize any 1-element scale tensors to scalars
+        output_tensors, normalized_count = normalize_tensorwise_scales(output_tensors)
+        if normalized_count > 0:
+            print(f"  Normalized {normalized_count} scale tensors to scalars")
+        save_file(output_tensors, output_file)
+
+        print("Cleanup complete!")
+    except Exception as e:
+        print(f"FATAL: Error saving file '{output_file}': {e}")
+        return
+
+
 def convert_int8_to_comfy_quant(
     input_file: str,
     output_file: str,
@@ -4451,6 +4591,22 @@ def main():
         help="Add .scale_input tensors to legacy fp8_scaled models (keeps legacy format, adds missing input scales)",
     )
 
+    # Legacy FP8 cleanup mode
+    parser.add_argument(
+        "--cleanup-fp8-scaled",
+        action="store_true",
+        dest="cleanup_fp8_scaled",
+        help="Clean up legacy fp8_scaled model: remove orphaned scales, set scaled_fp8 marker, normalize scales",
+    )
+    parser.add_argument(
+        "--scaled-fp8-marker",
+        type=int,
+        default=0,
+        choices=[0, 2],
+        dest="scaled_fp8_marker",
+        help="Size for scaled_fp8 marker tensor: 0=empty((0)), 2=empty((2)). (default: 0)",
+    )
+
     # Metadata saving option
     parser.add_argument(
         "--save-quant-metadata",
@@ -4602,6 +4758,28 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             return
 
         add_legacy_input_scale(args.input, args.output)
+        return
+
+    # Handle legacy FP8 cleanup mode (separate workflow)
+    if args.cleanup_fp8_scaled:
+        if not args.output:
+            base = os.path.splitext(args.input)[0]
+            args.output = f"{base}_cleaned.safetensors"
+
+        if not os.path.exists(args.input):
+            print(f"Error: Input file not found: {args.input}")
+            return
+
+        if os.path.abspath(args.input) == os.path.abspath(args.output):
+            print("Error: Output file cannot be same as input.")
+            return
+
+        cleanup_fp8_scaled(
+            args.input,
+            args.output,
+            marker_size=args.scaled_fp8_marker,
+            add_scale_input=args.input_scale,
+        )
         return
 
     # Handle comfy_quant editing mode (separate workflow)
