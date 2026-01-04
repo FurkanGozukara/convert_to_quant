@@ -14,6 +14,7 @@ import math
 import json
 from torch.optim import AdamW, RAdam
 from .comfy.quant_ops import BlockWiseINT8Layout
+from .pinned_transfer import transfer_to_gpu_pinned
 
 # --- Constants and Configuration ---
 torch.set_printoptions(precision=8)
@@ -1373,7 +1374,7 @@ class LearnedRoundingConverter:
     def convert(
         self, W_orig: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        W_float32 = W_orig.to(self.device, dtype=COMPUTE_DTYPE)
+        W_float32 = transfer_to_gpu_pinned(W_orig, self.device, COMPUTE_DTYPE)
 
         if torch.all(W_float32 == 0):
             print("  - Tensor is all zeros, skipping optimization.")
