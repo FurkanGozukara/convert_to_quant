@@ -128,6 +128,31 @@ ZIMAGE_LAYER_KEYNAMES = [
     "time_text_embed",
 ]
 ZIMAGE_REFINER_LAYER_KEYNAMES = ["context_refiner", "noise_refiner"]
+LTXV2_LAYER_KEYNAMES = [
+    "scale_shift_table",
+    "text_embedding_projection",
+    "audio_vae",
+    "audio_embeddings_connector",
+    "adaln_single",
+    "audio_adaln_single",
+    "audio_patchify_proj",
+    "audio_proj_out",
+    "audio_prompt_adaln_single",
+    "av_ca_a2v_gate_adaln_single",
+    "av_ca_audio_scale_shift_adaln_single",
+    "av_ca_v2a_gate_adaln_single",
+    "av_ca_video_scale_shift_adaln_single",
+    "patchify_proj",
+    "proj_out",
+    "prompt_adaln_single",
+    "transformer_blocks.0.",
+    "transformer_blocks.1.",
+    "transformer_blocks.46.",
+    "transformer_blocks.47.",
+    "vae.decoder",
+    "vae.encoder",
+    "vocoder",
+]
 
 # --- Model Filter Registry ---
 # Each entry maps a CLI flag (--radiance, --flux2, etc.) to its layer patterns.
@@ -217,6 +242,11 @@ MODEL_FILTERS = {
         "category": "image",
         "exclude": ZIMAGE_AVOID_KEY_NAMES,
         "highprec": ZIMAGE_REFINER_LAYER_KEYNAMES,
+    },
+    "ltxv2": {
+        "help": "LTXv2: keep some transformer blocks high-precision and exclude vae and vocoder",
+        "category": "video",
+        "highprec": LTXV2_LAYER_KEYNAMES,
     },
 }
 
