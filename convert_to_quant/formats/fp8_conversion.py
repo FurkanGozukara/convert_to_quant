@@ -430,7 +430,7 @@ def convert_to_fp8_scaled(
         apply_heur = custom_heur if use_custom else skip_inefficient_layers
         if apply_heur:
             should_skip, skip_perf_reason = should_skip_layer_for_performance(
-                original_tensor, block_size
+                original_tensor, getattr(converter, "block_size", block_size)
             )
             if should_skip:
                 info(f"  - Skipping for performance: {skip_perf_reason}")
