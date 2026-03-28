@@ -37,6 +37,7 @@ AVOID_KEY_NAMES = [
     "input_layernorm",
     "attention_norm",
     "post_attention_layernorm",
+    "mm_input_projection_weight",
 ]
 T5XXL_REMOVE_KEY_NAMES = ["decoder", "lm_head"]
 VISUAL_AVOID_KEY_NAMES = ["mlp.down_proj", "mlp.up_proj", "mlp.gate_proj"]
