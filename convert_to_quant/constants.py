@@ -128,6 +128,20 @@ QWEN_LAYER_KEYNAMES = [
     "transformer_blocks.0.img_mod.1",
     "txt_in",
 ]
+ERNIE_IMAGE_AVOID_KEY_NAMES = [
+    "adaLN_mlp_ln",
+    "adaLN_sa_ln",
+    "self_attention.norm_k",
+    "self_attention.norm_q",
+]
+ERNIE_IMAGE_LAYER_KEYNAMES = [
+    "x_embedder",
+    "text_proj",
+    "time_embedding",
+    "adaLN_modulation",
+    "final_norm",
+    "final_linear",
+]
 ZIMAGE_LAYER_KEYNAMES = [
     "x_embedder",
     "clip_text_pooled_proj",
@@ -255,6 +269,12 @@ MODEL_FILTERS = {
         "category": "image",
         "exclude": QWEN_AVOID_KEY_NAMES,
         "highprec": QWEN_LAYER_KEYNAMES,
+    },
+    "ernie_image": {
+        "help": "ERNIE Image diffusion transformer: keep embeddings, modulation, and output layers high-precision",
+        "category": "image",
+        "exclude": ERNIE_IMAGE_AVOID_KEY_NAMES,
+        "highprec": ERNIE_IMAGE_LAYER_KEYNAMES,
     },
     "zimage": {
         "help": "Z-Image: skip cap_embedder/norms, keep x_embedder/final high-precision",
