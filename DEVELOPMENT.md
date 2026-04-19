@@ -1,6 +1,20 @@
 
 ---
 
+## 2026-04-19: FLUX Klein Model Filter Preset
+
+### Session Summary
+Added a `--flux_klein` model-specific filter preset for FLUX.2 Klein checkpoints. The preset keeps the Klein-sensitive modulation, time, final, image input, and text input layers in high precision during quantization.
+
+### Files Modified
+- `convert_to_quant/constants.py`: Added `FLUX_KLEIN_LAYER_KEYNAMES` and registered the `flux_klein` model filter.
+- `musubi_tuner_gui/model_quantizer_gui.py`: Exposed the backend `flux_klein` filter as `FLUX.2 Klein` in model presets and fallback filter metadata.
+
+### Usage
+Run conversion with `--flux_klein`, for example: `convert_to_quant -i flux2-klein-base-9b.safetensors --flux_klein --comfy_quant`.
+
+---
+
 ## 2026-02-21: Prodigy Optimizer Support
 
 ### Session Summary

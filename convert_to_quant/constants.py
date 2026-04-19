@@ -68,9 +68,18 @@ ZIMAGE_AVOID_KEY_NAMES = [
 ]
 
 # --- Layer key names for specific models (layers to include as high-precision) ---
-FLUX2_LAYER_KEYNAMES = [
+FLUX_STYLE_LAYER_KEYNAMES = [
     "stream_modulation",
     "guidance_in",
+    "time_in",
+    "final_layer",
+    "img_in",
+    "txt_in",
+]
+FLUX1_LAYER_KEYNAMES = FLUX_STYLE_LAYER_KEYNAMES
+FLUX2_LAYER_KEYNAMES = FLUX_STYLE_LAYER_KEYNAMES
+FLUX_KLEIN_LAYER_KEYNAMES = [
+    "stream_modulation",
     "time_in",
     "final_layer",
     "img_in",
@@ -188,10 +197,20 @@ MODEL_FILTERS = {
         "category": "text",
     },
     # Diffusion Models (Flux-style)
+    "flux1": {
+        "help": "Flux.1: keep modulation/guidance/time/final layers high-precision",
+        "category": "diffusion",
+        "highprec": FLUX1_LAYER_KEYNAMES,
+    },
     "flux2": {
         "help": "Flux.2: keep modulation/guidance/time/final layers high-precision",
         "category": "diffusion",
         "highprec": FLUX2_LAYER_KEYNAMES,
+    },
+    "flux_klein": {
+        "help": "FLUX.2 Klein: keep modulation/time/final/input layers high-precision",
+        "category": "diffusion",
+        "highprec": FLUX_KLEIN_LAYER_KEYNAMES,
     },
     "distillation_large": {
         "help": "Chroma/distilled (large): keep distilled_guidance, final, img/txt_in high-precision",
