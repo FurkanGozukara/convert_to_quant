@@ -19,11 +19,7 @@ from .argument_parser import (
     MODES_ARGS,
     LORA_ARGS,
 )
-from ..constants import (
-    NORMALIZE_SCALES_ENABLED,
-    TARGET_FP8_DTYPE,
-    MODEL_FILTERS,
-)
+from ..constants import NORMALIZE_SCALES_ENABLED, TARGET_FP8_DTYPE, MODEL_FILTERS
 from ..config.layer_config import load_layer_config, generate_config_template
 from ..formats.fp8_conversion import convert_to_fp8_scaled
 from ..formats.format_migration import convert_fp8_scaled_to_comfy_quant
@@ -59,9 +55,7 @@ def load_input_scales(path: str) -> dict:
                     scales[base] = f.get_tensor(key).item()
         return scales
     else:
-        raise ValueError(
-            f"Unsupported input scales format: {path}. Use .json or .safetensors"
-        )
+        raise ValueError(f"Unsupported input scales format: {path}. Use .json or .safetensors")
 
 
 def extract_filter_flags(args) -> dict:
@@ -81,8 +75,7 @@ def extract_filter_flags(args) -> dict:
     for name in MODEL_FILTERS.keys():
         if not hasattr(args, name):
             raise RuntimeError(
-                f"BUG: Filter '{name}' in MODEL_FILTERS but not in argparse. "
-                f"Add --{name} to argument_parser.py"
+                f"BUG: Filter '{name}' in MODEL_FILTERS but not in argparse. Add --{name} to argument_parser.py"
             )
         if getattr(args, name):
             flags[name] = True
@@ -116,27 +109,14 @@ def main():
         lora_args=LORA_ARGS,
     )
 
+    parser.add_argument("-i", "--input", type=str, required=True, help="Input safetensors file path.")
     parser.add_argument(
-        "-i", "--input", type=str, required=True, help="Input safetensors file path."
+        "-o", "--output", type=str, help="Output safetensors file path. Auto-generated if not provided."
     )
     parser.add_argument(
-        "-o",
-        "--output",
-        type=str,
-        help="Output safetensors file path. Auto-generated if not provided.",
+        "--comfy_quant", "--comfy-quant", action="store_true", dest="comfy_quant", help="Use Comfy quantization method."
     )
-    parser.add_argument(
-        "--comfy_quant",
-        "--comfy-quant",
-        action="store_true",
-        dest="comfy_quant",
-        help="Use Comfy quantization method.",
-    )
-    parser.add_argument(
-        "--int8",
-        action="store_true",
-        help="Use INT8 block-wise quantization instead of FP8.",
-    )
+    parser.add_argument("--int8", action="store_true", help="Use INT8 block-wise quantization instead of FP8.")
     parser.add_argument(
         "--nvfp4",
         action="store_true",
@@ -242,11 +222,7 @@ def main():
         dest="fallback_simple",
         help="Use simple quantization for fallback-type layers",
     )
-    parser.add_argument(
-        "--simple",
-        action="store_true",
-        help="Skip SVD optimization, use simple quantization.",
-    )
+    parser.add_argument("--simple", action="store_true", help="Skip SVD optimization, use simple quantization.")
     parser.add_argument(
         "--full_precision_matrix_mult",
         "--full-precision-matrix-mult",
@@ -256,9 +232,7 @@ def main():
         help="Add full_precision_matrix_mult=True to .comfy_quant metadata.",
     )
     parser.add_argument(
-        "--heur",
-        action="store_true",
-        help="Skip layers with poor quantization characteristics (aspect ratio, size).",
+        "--heur", action="store_true", help="Skip layers with poor quantization characteristics (aspect ratio, size)."
     )
     parser.add_argument(
         "--device",
@@ -346,12 +320,7 @@ def main():
         dest="num_iter",
         help="Total optimization iterations per tensor.",
     )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=1.0,
-        help="[AdamW/RAdam/Original] Initial learning rate.",
-    )
+    parser.add_argument("--lr", type=float, default=1.0, help="[AdamW/RAdam/Original] Initial learning rate.")
     parser.add_argument(
         "--use_speed",
         "--use-speed",
@@ -377,12 +346,7 @@ def main():
         help="[exponential] Decay factor per step (default: 0.99)",
     )
     parser.add_argument(
-        "--lr_patience",
-        "--lr-patience",
-        type=int,
-        default=1,
-        dest="lr_patience",
-        help="[plateau] Steps before decay",
+        "--lr_patience", "--lr-patience", type=int, default=1, dest="lr_patience", help="[plateau] Steps before decay"
     )
     parser.add_argument(
         "--lr_factor",
@@ -393,12 +357,7 @@ def main():
         help="[plateau, adaptive] LR reduction factor",
     )
     parser.add_argument(
-        "--lr_min",
-        "--lr-min",
-        type=float,
-        default=1e-8,
-        dest="lr_min",
-        help="[plateau] Minimum LR bound",
+        "--lr_min", "--lr-min", type=float, default=1e-8, dest="lr_min", help="[plateau] Minimum LR bound"
     )
     parser.add_argument(
         "--lr_cooldown",
@@ -498,20 +457,10 @@ def main():
         help="Proportion of principal components (SVD) to use.",
     )
     parser.add_argument(
-        "--min_k",
-        "--min-k",
-        type=int,
-        default=256,
-        dest="min_k",
-        help="Minimum number of principal components.",
+        "--min_k", "--min-k", type=int, default=256, dest="min_k", help="Minimum number of principal components."
     )
     parser.add_argument(
-        "--max_k",
-        "--max-k",
-        type=int,
-        default=1280,
-        dest="max_k",
-        help="Maximum number of principal components.",
+        "--max_k", "--max-k", type=int, default=1280, dest="max_k", help="Maximum number of principal components."
     )
 
     # LoRA extraction options (--help-lora)
@@ -795,8 +744,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
     if args.block_size is None:
         needs_block = (
             (args.int8 and getattr(args, "scaling_mode", "tensor") != "tensor")
-            or getattr(args, "scaling_mode", "tensor")
-            in ("block", "block2d", "block3d")
+            or getattr(args, "scaling_mode", "tensor") in ("block", "block2d", "block3d")
             or args.custom_type == "int8"
             or args.fallback == "int8"
         )
@@ -804,11 +752,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             args.block_size = 128
 
     # Apply default block_size=128 for custom/fallback INT8 if not set
-    if (
-        args.custom_type == "int8"
-        and args.custom_scaling_mode != "tensor"
-        and args.custom_block_size is None
-    ):
+    if args.custom_type == "int8" and args.custom_scaling_mode != "tensor" and args.custom_block_size is None:
         args.custom_block_size = args.block_size if args.block_size else 128
     if args.fallback == "int8" and args.fallback_block_size is None:
         args.fallback_block_size = args.block_size if args.block_size else 128
@@ -830,9 +774,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             return
 
         template_path = os.path.splitext(args.input)[0] + "_layer_config_template.json"
-        generate_config_template(
-            args.input, template_path, block_size=args.block_size or 128
-        )
+        generate_config_template(args.input, template_path, block_size=args.block_size or 128)
         return
 
     # Handle fp8_scaled conversion mode first (separate workflow)
@@ -920,11 +862,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
                 return
 
             # Compute seed early (same logic as FP8)
-            seed = (
-                int(torch.randint(0, 2**32 - 1, ()).item())
-                if args.manual_seed == -1
-                else args.manual_seed
-            )
+            seed = int(torch.randint(0, 2**32 - 1, ()).item()) if args.manual_seed == -1 else args.manual_seed
             print(f"Using seed: {seed}")
 
             # Extract filter flags with validation
@@ -934,14 +872,10 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             input_scales = None
             if args.input_scales_path:
                 if not os.path.exists(args.input_scales_path):
-                    print(
-                        f"Error: Input scales file not found: {args.input_scales_path}"
-                    )
+                    print(f"Error: Input scales file not found: {args.input_scales_path}")
                     return
                 input_scales = load_input_scales(args.input_scales_path)
-                print(
-                    f"Loaded {len(input_scales)} input scales from: {args.input_scales_path}"
-                )
+                print(f"Loaded {len(input_scales)} input scales from: {args.input_scales_path}")
 
             # Call convert_to_nvfp4 with explicit args (no **kwargs footgun)
             convert_to_nvfp4(
@@ -1011,11 +945,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             print("Error: Output file cannot be same as input.")
             return
 
-        convert_to_hybrid_mxfp8(
-            args.input,
-            args.output,
-            tensor_scales_path=args.tensor_scales_path,
-        )
+        convert_to_hybrid_mxfp8(args.input, args.output, tensor_scales_path=args.tensor_scales_path)
         return
 
     # Handle MXFP8 quantization mode (separate workflow OR unified if mixing formats)
@@ -1054,11 +984,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
                 return
 
             # Compute seed early (same logic as FP8/NVFP4)
-            seed = (
-                int(torch.randint(0, 2**32 - 1, ()).item())
-                if args.manual_seed == -1
-                else args.manual_seed
-            )
+            seed = int(torch.randint(0, 2**32 - 1, ()).item()) if args.manual_seed == -1 else args.manual_seed
             print(f"Using seed: {seed}")
 
             # Extract filter flags with validation
@@ -1148,27 +1074,16 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             return
 
         cleanup_fp8_scaled(
-            args.input,
-            args.output,
-            marker_size=args.scaled_fp8_marker,
-            add_scale_input=args.input_scale,
+            args.input, args.output, marker_size=args.scaled_fp8_marker, add_scale_input=args.input_scale
         )
         return
 
     # Handle activation scale calibration mode (separate workflow)
     if args.actcal:
         try:
-            from .calibrate_activation_scales import (
-                calibrate_model,
-                patch_model_with_scales,
-                load_lora_tensors,
-            )
+            from .calibrate_activation_scales import calibrate_model, patch_model_with_scales, load_lora_tensors
         except ImportError:
-            from calibrate_activation_scales import (
-                calibrate_model,
-                patch_model_with_scales,
-                load_lora_tensors,
-            )
+            from calibrate_activation_scales import calibrate_model, patch_model_with_scales, load_lora_tensors
 
         if not args.output:
             base = os.path.splitext(args.input)[0]
@@ -1197,9 +1112,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             print(f"  LoRA layers found: {len(lora_tensors)}")
 
         mode = "LoRA-informed" if lora_tensors else "random"
-        print(
-            f"\nCalibrating input_scale using {mode} PTQ ({args.actcal_samples} samples)..."
-        )
+        print(f"\nCalibrating input_scale using {mode} PTQ ({args.actcal_samples} samples)...")
         scales = calibrate_model(
             tensors,
             calib_samples=args.actcal_samples,
@@ -1235,17 +1148,13 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             return
 
         if not args.remove_keys and not args.add_keys and not args.save_quant_metadata:
-            print(
-                "Error: --edit-quant requires at least one of --remove-keys, --add-keys, or --save-quant-metadata"
-            )
+            print("Error: --edit-quant requires at least one of --remove-keys, --add-keys, or --save-quant-metadata")
             return
 
         # Parse remove_keys from comma-separated string
         remove_keys_list = None
         if args.remove_keys:
-            remove_keys_list = [
-                k.strip() for k in args.remove_keys.split(",") if k.strip()
-            ]
+            remove_keys_list = [k.strip() for k in args.remove_keys.split(",") if k.strip()]
 
         edit_comfy_quant(
             args.input,
@@ -1259,9 +1168,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
 
     # Determine which formats require block_size
     primary_needs_block_size = args.int8 and args.scaling_mode != "tensor"
-    custom_needs_block_size = (
-        args.custom_type == "int8" and args.custom_scaling_mode != "tensor"
-    )
+    custom_needs_block_size = args.custom_type == "int8" and args.custom_scaling_mode != "tensor"
     fallback_needs_block_size = args.fallback == "int8"
 
     # Validate block_size for primary format
@@ -1272,17 +1179,13 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
 
     # Validate custom-block-size for custom format
     if args.custom_type and custom_needs_block_size and args.custom_block_size is None:
-        print(
-            f"Error: --custom-block-size is required when using --custom-type {args.custom_type}."
-        )
+        print(f"Error: --custom-block-size is required when using --custom-type {args.custom_type}.")
         print("       Example: --custom-block-size 128")
         sys.exit(1)
 
     # Validate fallback-block-size for fallback format
     if args.fallback and fallback_needs_block_size and args.fallback_block_size is None:
-        print(
-            f"Error: --fallback-block-size is required when using --fallback {args.fallback}."
-        )
+        print(f"Error: --fallback-block-size is required when using --fallback {args.fallback}.")
         print("       Example: --fallback-block-size 128")
         sys.exit(1)
 
@@ -1292,23 +1195,15 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
 
     # Auto-enable comfy_quant if custom-type is used (required for mixed precision)
     if args.custom_type and not args.comfy_quant:
-        print(
-            "Note: --comfy_quant auto-enabled (required for --custom-type mixed precision)"
-        )
+        print("Note: --comfy_quant auto-enabled (required for --custom-type mixed precision)")
         args.comfy_quant = True
 
     # Only check FP8 support if not using INT8
     if not args.int8:
         try:
-            _ = torch.zeros(
-                1,
-                dtype=TARGET_FP8_DTYPE,
-                device="cuda" if torch.cuda.is_available() else "cpu",
-            )
+            _ = torch.zeros(1, dtype=TARGET_FP8_DTYPE, device="cuda" if torch.cuda.is_available() else "cpu")
         except (RuntimeError, TypeError):
-            print(
-                "Error: This hardware/PyTorch version does not support the target FP8 dtype."
-            )
+            print("Error: This hardware/PyTorch version does not support the target FP8 dtype.")
             return
 
     if not args.output:
@@ -1330,9 +1225,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
         has_filters = any(filter_flags.values())
         has_custom = bool(args.custom_layers)
         mixed_suffix = "mixed" if (has_filters or has_custom) else ""
-        output_file = (
-            f"{base}_{prefix}{format_str}{mixed_suffix}{scaling_str}.safetensors"
-        )
+        output_file = f"{base}_{prefix}{format_str}{mixed_suffix}{scaling_str}.safetensors"
     else:
         output_file = args.output
 
@@ -1345,11 +1238,7 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
         print("Error: Output file cannot be same as input.")
         return
 
-    seed = (
-        int(torch.randint(0, 2**32 - 1, ()).item())
-        if args.manual_seed == -1
-        else args.manual_seed
-    )
+    seed = int(torch.randint(0, 2**32 - 1, ()).item()) if args.manual_seed == -1 else args.manual_seed
     print(f"Using seed: {seed}")
 
     # Load layer config if specified

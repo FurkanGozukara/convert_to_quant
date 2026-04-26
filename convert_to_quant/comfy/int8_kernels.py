@@ -93,9 +93,8 @@ def act_quant_kernel(x_ptr, y_ptr, s_ptr, BLOCK_SIZE: tl.constexpr):
     tl.store(y_ptr + offs, y)
     tl.store(s_ptr + pid, s)
 
-def act_quant(
-    x: torch.Tensor, block_size: int = 128
-) -> Tuple[torch.Tensor, torch.Tensor]:
+
+def act_quant(x: torch.Tensor, block_size: int = 128) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Quantizes the input tensor `x` using block-wise quantization.
 
@@ -109,9 +108,9 @@ def act_quant(
             - A tensor of scaling factors with dtype `torch.float32`.
     """
     assert x.is_contiguous(), "Input tensor must be contiguous"
-    assert (
-        x.size(-1) % block_size == 0
-    ), f"Last dimension size must be divisible by block_size (block_size={block_size})"
+    assert x.size(-1) % block_size == 0, (
+        f"Last dimension size must be divisible by block_size (block_size={block_size})"
+    )
     y = torch.empty_like(x, dtype=torch.int8)
     s = x.new_empty(*x.size()[:-1], x.size(-1) // block_size, dtype=torch.float32)
     # Grid size should match number of scale elements (one program per block)
@@ -144,11 +143,9 @@ def act_dequant_kernel(x_ptr, s_ptr, y_ptr, BLOCK_SIZE: tl.constexpr):
     y = y.to(y_ptr.dtype.element_ty)
     tl.store(y_ptr + offs, y)
 
+
 def act_dequant(
-    x: torch.Tensor,
-    s: torch.Tensor,
-    block_size: int = 128,
-    output_dtype: torch.dtype = None,
+    x: torch.Tensor, s: torch.Tensor, block_size: int = 128, output_dtype: torch.dtype = None
 ) -> torch.Tensor:
     """
     Dequantizes the activation tensor `x` using the provided scale tensor.
@@ -163,9 +160,9 @@ def act_dequant(
         torch.Tensor: The dequantized activation tensor of the same shape as `x`.
     """
     assert x.is_contiguous() and s.is_contiguous(), "Input tensors must be contiguous"
-    assert (
-        x.size(-1) % block_size == 0
-    ), f"Last dimension size must be divisible by block_size (block_size={block_size})"
+    assert x.size(-1) % block_size == 0, (
+        f"Last dimension size must be divisible by block_size (block_size={block_size})"
+    )
 
     if output_dtype is None:
         output_dtype = torch.get_default_dtype()
@@ -216,9 +213,8 @@ def weight_quant_kernel(x_ptr, y_ptr, s_ptr, M, N, BLOCK_SIZE: tl.constexpr):
     tl.store(y_ptr + offs, y, mask=mask)
     tl.store(s_ptr + pid_m * n + pid_n, s)
 
-def weight_quant(
-    x: torch.Tensor, block_size: int = 128
-) -> Tuple[torch.Tensor, torch.Tensor]:
+
+def weight_quant(x: torch.Tensor, block_size: int = 128) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Quantizes the weight tensor using block-wise quantization.
 
@@ -237,17 +233,14 @@ def weight_quant(
     assert x.is_contiguous(), "Input tensor must be contiguous"
     assert x.dim() == 2, "Input tensor must have 2 dimensions"
     M, N = x.size()
-    assert (
-        M % block_size == 0 and N % block_size == 0
-    ), f"Dimensions must be divisible by block_size={block_size}, got shape {x.shape}"
+    assert M % block_size == 0 and N % block_size == 0, (
+        f"Dimensions must be divisible by block_size={block_size}, got shape {x.shape}"
+    )
 
     y = torch.empty_like(x, dtype=torch.int8)
     s = x.new_empty(M // block_size, N // block_size, dtype=torch.float32)
 
-    grid = lambda meta: (
-        triton.cdiv(M, meta["BLOCK_SIZE"]),
-        triton.cdiv(N, meta["BLOCK_SIZE"]),
-    )
+    grid = lambda meta: (triton.cdiv(M, meta["BLOCK_SIZE"]), triton.cdiv(N, meta["BLOCK_SIZE"]))
     weight_quant_kernel[grid](x, y, s, M, N, BLOCK_SIZE=block_size)
     return y, s
 
@@ -280,11 +273,9 @@ def weight_dequant_kernel(x_ptr, s_ptr, y_ptr, M, N, BLOCK_SIZE: tl.constexpr):
     y = x * s
     tl.store(y_ptr + offs, y, mask=mask)
 
+
 def weight_dequant(
-    x: torch.Tensor,
-    s: torch.Tensor,
-    block_size: int = 128,
-    output_dtype: torch.dtype = None,
+    x: torch.Tensor, s: torch.Tensor, block_size: int = 128, output_dtype: torch.dtype = None
 ) -> torch.Tensor:
     """
     Dequantizes the given weight tensor using the provided scale tensor.
@@ -309,19 +300,13 @@ def weight_dequant(
         output_dtype = torch.get_default_dtype()
 
     y = torch.empty_like(x, dtype=output_dtype)
-    grid = lambda meta: (
-        triton.cdiv(M, meta["BLOCK_SIZE"]),
-        triton.cdiv(N, meta["BLOCK_SIZE"]),
-    )
+    grid = lambda meta: (triton.cdiv(M, meta["BLOCK_SIZE"]), triton.cdiv(N, meta["BLOCK_SIZE"]))
     weight_dequant_kernel[grid](x, s, y, M, N, BLOCK_SIZE=block_size)
     return y
 
+
 int8_gemm_configs = [
-    Config(
-        {"BLOCK_SIZE_M": block_m, "BLOCK_SIZE_N": block_n, "BLOCK_SIZE_K": 128},
-        num_stages=num_stages,
-        num_warps=8,
-    )
+    Config({"BLOCK_SIZE_M": block_m, "BLOCK_SIZE_N": block_n, "BLOCK_SIZE_K": 128}, num_stages=num_stages, num_warps=8)
     for block_m in [128, 256]  # >= 128 for consistency with out_block_size
     for block_n in [128, 256]  # >= 128 required for out_block_size compatibility
     for num_stages in [3, 4, 5]
@@ -491,13 +476,8 @@ def int8_gemm_addmm_kernel(
     mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, c, mask=mask)
 
-def int8_gemm(
-    a: torch.Tensor,
-    a_s: torch.Tensor,
-    b: torch.Tensor,
-    b_s: torch.Tensor,
-    input_block_size: int = 128,
-):
+
+def int8_gemm(a: torch.Tensor, a_s: torch.Tensor, b: torch.Tensor, b_s: torch.Tensor, input_block_size: int = 128):
     """
     Perform a matrix multiplication using INT8 precision.
 
@@ -517,9 +497,7 @@ def int8_gemm(
         torch.Tensor: The result of the matrix multiplication.
     """
     assert a.is_contiguous() and b.is_contiguous(), "Input tensors must be contiguous"
-    assert (
-        a_s.is_contiguous() and b_s.is_contiguous()
-    ), "Scaling factor tensors must be contiguous"
+    assert a_s.is_contiguous() and b_s.is_contiguous(), "Scaling factor tensors must be contiguous"
     assert b.dim() == 2, f"Expected b to be 2D, got shape {b.shape}"
 
     K = a.size(-1)
@@ -533,24 +511,12 @@ def int8_gemm(
     # Output tensor (same batch shape as input, last dim = N)
     # let's use float16 as output dtype
     c = a.new_empty(*a.size()[:-1], N, dtype=torch.float16)
-    grid = lambda META: (
-        triton.cdiv(M, META["BLOCK_SIZE_M"]),
-        triton.cdiv(N, META["BLOCK_SIZE_N"]),
-    )
+    grid = lambda META: (triton.cdiv(M, META["BLOCK_SIZE_M"]), triton.cdiv(N, META["BLOCK_SIZE_N"]))
     int8_gemm_kernel[grid](
-        a,
-        b,
-        c,
-        a_s,
-        b_s,
-        M,
-        N,
-        K,
-        BLOCK_SIZE_M=128,
-        BLOCK_SIZE_N=128,
-        BLOCK_SIZE_K=input_block_size,
+        a, b, c, a_s, b_s, M, N, K, BLOCK_SIZE_M=128, BLOCK_SIZE_N=128, BLOCK_SIZE_K=input_block_size
     )
     return c
+
 
 def int8_addmm(
     a: torch.Tensor,
@@ -593,9 +559,7 @@ def int8_addmm(
         >>> output = int8_addmm(a_int8, a_scale, b_int8, b_scale, bias)
     """
     assert a.is_contiguous() and b.is_contiguous(), "Input tensors must be contiguous"
-    assert (
-        a_s.is_contiguous() and b_s.is_contiguous()
-    ), "Scaling factor tensors must be contiguous"
+    assert a_s.is_contiguous() and b_s.is_contiguous(), "Scaling factor tensors must be contiguous"
     assert b.dim() == 2, f"Expected b to be 2D, got shape {b.shape}"
 
     K = a.size(-1)
@@ -614,19 +578,14 @@ def int8_addmm(
     has_bias = bias is not None
     if has_bias:
         assert bias.is_contiguous(), "Bias tensor must be contiguous"
-        assert (
-            bias.dim() == 1 and bias.size(0) == N
-        ), f"Bias must be 1D with length {N}, got shape {bias.shape}"
+        assert bias.dim() == 1 and bias.size(0) == N, f"Bias must be 1D with length {N}, got shape {bias.shape}"
         bias_ptr = bias
     else:
         # Create a dummy pointer (won't be used due to HAS_BIAS=False)
         bias_ptr = c
 
     # Launch kernel
-    grid = lambda META: (
-        triton.cdiv(M, META["BLOCK_SIZE_M"]),
-        triton.cdiv(N, META["BLOCK_SIZE_N"]),
-    )
+    grid = lambda META: (triton.cdiv(M, META["BLOCK_SIZE_M"]), triton.cdiv(N, META["BLOCK_SIZE_N"]))
     int8_gemm_addmm_kernel[grid](
         a,
         b,
@@ -673,11 +632,7 @@ def int8_addmm(
 
 
 # @triton.autotune(configs=int8_gemm_configs, key=["N", "K"])
-@triton.heuristics(
-    {
-        "NUM_BLOCKS": lambda args: args["BLOCK_SIZE_N"] // args["out_block_size"],
-    }
-)
+@triton.heuristics({"NUM_BLOCKS": lambda args: args["BLOCK_SIZE_N"] // args["out_block_size"]})
 @triton.jit
 def int8_gemm_quant_kernel(
     a_ptr,
@@ -747,9 +702,7 @@ def int8_gemm_quant_kernel(
 
     # Quantize in activation format: per-row, block-wise at out_block_size granularity
     # Reshape accumulator to separate blocks: (BLOCK_SIZE_M, BLOCK_SIZE_N) -> (BLOCK_SIZE_M, NUM_BLOCKS, out_block_size)
-    accumulator_reshaped = tl.reshape(
-        accumulator, (BLOCK_SIZE_M, NUM_BLOCKS, out_block_size)
-    )
+    accumulator_reshaped = tl.reshape(accumulator, (BLOCK_SIZE_M, NUM_BLOCKS, out_block_size))
 
     # Compute max per block: reduce over out_block_size dimension
     # Shape: (BLOCK_SIZE_M, NUM_BLOCKS)
@@ -782,19 +735,13 @@ def int8_gemm_quant_kernel(
     n_scale_stride = N // out_block_size  # Total number of N blocks
     offs_m_scale = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_n_scale = pid_n * NUM_BLOCKS + tl.arange(0, NUM_BLOCKS)
-    scale_ptrs = (
-        c_s_ptr + offs_m_scale[:, None] * n_scale_stride + offs_n_scale[None, :]
-    )
+    scale_ptrs = c_s_ptr + offs_m_scale[:, None] * n_scale_stride + offs_n_scale[None, :]
     scale_mask = (offs_m_scale[:, None] < M) & (offs_n_scale[None, :] < n_scale_stride)
     tl.store(scale_ptrs, block_scale, mask=scale_mask)
 
 
 # @triton.autotune(configs=int8_gemm_configs, key=["N", "K"])
-@triton.heuristics(
-    {
-        "NUM_BLOCKS": lambda args: args["BLOCK_SIZE_N"] // args["out_block_size"],
-    }
-)
+@triton.heuristics({"NUM_BLOCKS": lambda args: args["BLOCK_SIZE_N"] // args["out_block_size"]})
 @triton.jit
 def int8_gemm_addmm_quant_kernel(
     a_ptr,
@@ -874,9 +821,7 @@ def int8_gemm_addmm_quant_kernel(
 
     # Quantize in activation format: per-row, block-wise at out_block_size granularity
     # Reshape accumulator to separate blocks: (BLOCK_SIZE_M, BLOCK_SIZE_N) -> (BLOCK_SIZE_M, NUM_BLOCKS, out_block_size)
-    accumulator_reshaped = tl.reshape(
-        accumulator, (BLOCK_SIZE_M, NUM_BLOCKS, out_block_size)
-    )
+    accumulator_reshaped = tl.reshape(accumulator, (BLOCK_SIZE_M, NUM_BLOCKS, out_block_size))
 
     # Compute max per block: reduce over out_block_size dimension
     # Shape: (BLOCK_SIZE_M, NUM_BLOCKS)
@@ -909,11 +854,10 @@ def int8_gemm_addmm_quant_kernel(
     n_scale_stride = N // out_block_size  # Total number of N blocks
     offs_m_scale = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_n_scale = pid_n * NUM_BLOCKS + tl.arange(0, NUM_BLOCKS)
-    scale_ptrs = (
-        c_s_ptr + offs_m_scale[:, None] * n_scale_stride + offs_n_scale[None, :]
-    )
+    scale_ptrs = c_s_ptr + offs_m_scale[:, None] * n_scale_stride + offs_n_scale[None, :]
     scale_mask = (offs_m_scale[:, None] < M) & (offs_n_scale[None, :] < n_scale_stride)
     tl.store(scale_ptrs, block_scale, mask=scale_mask)
+
 
 def int8_gemm_quant(
     a: torch.Tensor,
@@ -943,9 +887,7 @@ def int8_gemm_quant(
         Tuple of (quantized output INT8, output scales in activation format)
     """
     assert a.is_contiguous() and b.is_contiguous(), "Input tensors must be contiguous"
-    assert (
-        a_s.is_contiguous() and b_s.is_contiguous()
-    ), "Scaling tensors must be contiguous"
+    assert a_s.is_contiguous() and b_s.is_contiguous(), "Scaling tensors must be contiguous"
     assert b.dim() == 2, f"Expected b to be 2D, got shape {b.shape}"
 
     K = a.size(-1)
@@ -954,9 +896,7 @@ def int8_gemm_quant(
     batch_shape = a.size()[:-1]
 
     assert b.size(1) == K, f"Shape mismatch: b.shape={b.shape}, expected [..., {K}]"
-    assert (
-        N % out_block_size == 0
-    ), f"N={N} must be divisible by out_block_size={out_block_size}"
+    assert N % out_block_size == 0, f"N={N} must be divisible by out_block_size={out_block_size}"
 
     # Allocate output tensors
     c = a.new_empty(*batch_shape, N, dtype=torch.int8)
@@ -966,10 +906,7 @@ def int8_gemm_quant(
     c_s = a.new_empty(M, n_blocks, dtype=torch.float32)
 
     # Launch kernel
-    grid = lambda META: (
-        triton.cdiv(M, META["BLOCK_SIZE_M"]),
-        triton.cdiv(N, META["BLOCK_SIZE_N"]),
-    )
+    grid = lambda META: (triton.cdiv(M, META["BLOCK_SIZE_M"]), triton.cdiv(N, META["BLOCK_SIZE_N"]))
 
     int8_gemm_quant_kernel[grid](
         a,
@@ -992,6 +929,7 @@ def int8_gemm_quant(
         c_s = c_s.reshape(*batch_shape, n_blocks)
 
     return c, c_s
+
 
 def int8_addmm_quant(
     a: torch.Tensor,
@@ -1023,9 +961,7 @@ def int8_addmm_quant(
         Tuple of (quantized output INT8, output scales in activation format)
     """
     assert a.is_contiguous() and b.is_contiguous(), "Input tensors must be contiguous"
-    assert (
-        a_s.is_contiguous() and b_s.is_contiguous()
-    ), "Scaling tensors must be contiguous"
+    assert a_s.is_contiguous() and b_s.is_contiguous(), "Scaling tensors must be contiguous"
     assert b.dim() == 2, f"Expected b to be 2D, got shape {b.shape}"
 
     K = a.size(-1)
@@ -1034,9 +970,7 @@ def int8_addmm_quant(
     batch_shape = a.size()[:-1]
 
     assert b.size(1) == K, f"Shape mismatch: b.shape={b.shape}, expected [..., {K}]"
-    assert (
-        N % out_block_size == 0
-    ), f"N={N} must be divisible by out_block_size={out_block_size}"
+    assert N % out_block_size == 0, f"N={N} must be divisible by out_block_size={out_block_size}"
 
     # Allocate output tensors
     c = a.new_empty(*batch_shape, N, dtype=torch.int8)
@@ -1049,18 +983,13 @@ def int8_addmm_quant(
     has_bias = bias is not None
     if has_bias:
         assert bias.is_contiguous(), "Bias tensor must be contiguous"
-        assert (
-            bias.dim() == 1 and bias.size(0) == N
-        ), f"Bias must be 1D with length {N}, got shape {bias.shape}"
+        assert bias.dim() == 1 and bias.size(0) == N, f"Bias must be 1D with length {N}, got shape {bias.shape}"
         bias_ptr = bias
     else:
         bias_ptr = c  # Dummy pointer
 
     # Launch kernel
-    grid = lambda META: (
-        triton.cdiv(M, META["BLOCK_SIZE_M"]),
-        triton.cdiv(N, META["BLOCK_SIZE_N"]),
-    )
+    grid = lambda META: (triton.cdiv(M, META["BLOCK_SIZE_M"]), triton.cdiv(N, META["BLOCK_SIZE_N"]))
 
     int8_gemm_addmm_quant_kernel[grid](
         a,
@@ -1095,11 +1024,7 @@ def int8_addmm_quant(
 # Note: BLOCK_N must be >= quantization block_size (typically 128) and divisible by it
 # BLOCK_M can be any size since we don't block in M dimension for activations
 int8_gelu_configs = [
-    Config(
-        {"BLOCK_M": block_m, "BLOCK_N": block_n},
-        num_stages=num_stages,
-        num_warps=num_warps,
-    )
+    Config({"BLOCK_M": block_m, "BLOCK_N": block_n}, num_stages=num_stages, num_warps=num_warps)
     for block_m in [64, 128, 256]
     for block_n in [128, 256]  # Must be >= block_size and divisible by it
     for num_stages in [2, 3, 4]
@@ -1110,9 +1035,7 @@ int8_gelu_configs = [
 # @triton.autotune(configs=int8_gelu_configs, key=["M", "N"])
 @triton.heuristics(
     {
-        "BLOCK_SM": lambda args: args[
-            "BLOCK_M"
-        ],  # For activations, no blocking in M dimension
+        "BLOCK_SM": lambda args: args["BLOCK_M"],  # For activations, no blocking in M dimension
         "BLOCK_SN": lambda args: args["BLOCK_N"] // args["BLOCK_SIZE"],
     }
 )
@@ -1229,9 +1152,8 @@ def int8_gelu_kernel(
     output_scale_ptrs = output_scale_ptr + offs_sm[:, None] * SN + offs_sn[None, :]
     tl.store(output_scale_ptrs, output_scales, mask=scale_mask)
 
-def int8_gelu(
-    x: torch.Tensor, s_x: torch.Tensor, block_size: int = 128
-) -> Tuple[torch.Tensor, torch.Tensor]:
+
+def int8_gelu(x: torch.Tensor, s_x: torch.Tensor, block_size: int = 128) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Fused INT8 GELU activation with block-wise quantization.
 
@@ -1253,17 +1175,13 @@ def int8_gelu(
     """
     assert x.is_contiguous(), "Input tensor must be contiguous"
     assert s_x.is_contiguous(), "Scale tensor must be contiguous"
-    assert (
-        x.size(-1) % block_size == 0
-    ), f"Last dimension must be divisible by block_size={block_size}"
+    assert x.size(-1) % block_size == 0, f"Last dimension must be divisible by block_size={block_size}"
 
     # Determine BLOCK_N - must be >= block_size and divisible by it
     # Use the larger of 128 or block_size to ensure good performance
     kernel_block_n = max(128, block_size)
     if kernel_block_n % block_size != 0:
-        kernel_block_n = (
-            block_size  # Fall back to block_size if 128 doesn't divide evenly
-        )
+        kernel_block_n = block_size  # Fall back to block_size if 128 doesn't divide evenly
 
     # Handle multi-dimensional tensors by reshaping to 2D
     original_shape = x.shape
@@ -1283,23 +1201,10 @@ def int8_gelu(
     s_y = torch.empty_like(s_x, dtype=torch.float32)
 
     # Launch kernel
-    grid = lambda META: (
-        triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
-    )
+    grid = lambda META: (triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),)
 
     int8_gelu_kernel[grid](
-        y,
-        s_y,
-        x,
-        s_x,
-        M,
-        N,
-        SM,
-        SN,
-        BLOCK_SIZE=block_size,
-        BLOCK_M=128,
-        BLOCK_N=kernel_block_n,
-        BLOCK_SM=128,
+        y, s_y, x, s_x, M, N, SM, SN, BLOCK_SIZE=block_size, BLOCK_M=128, BLOCK_N=kernel_block_n, BLOCK_SM=128
     )
 
     # Reshape back to original batch dimensions

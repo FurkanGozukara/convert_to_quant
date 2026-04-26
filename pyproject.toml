@@ -45,3 +45,9 @@ Repository = "https://github.com/silveroxides/convert_to_quant"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["convert_to_quant*"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true

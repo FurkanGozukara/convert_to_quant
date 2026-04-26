@@ -69,32 +69,11 @@ ZIMAGE_AVOID_KEY_NAMES = [
 ]
 
 # --- Layer key names for specific models (layers to include as high-precision) ---
-FLUX2_LAYER_KEYNAMES = [
-    "stream_modulation",
-    "guidance_in",
-    "time_in",
-    "final_layer",
-    "img_in",
-    "txt_in",
-]
-DISTILL_LAYER_KEYNAMES_LARGE = [
-    "distilled_guidance_layer",
-    "final_layer",
-    "img_in",
-    "txt_in",
-]
+FLUX2_LAYER_KEYNAMES = ["stream_modulation", "guidance_in", "time_in", "final_layer", "img_in", "txt_in"]
+DISTILL_LAYER_KEYNAMES_LARGE = ["distilled_guidance_layer", "final_layer", "img_in", "txt_in"]
 DISTILL_LAYER_KEYNAMES_SMALL = ["distilled_guidance_layer"]
-NERF_LAYER_KEYNAMES_LARGE = [
-    "distilled_guidance_layer",
-    "nerf_blocks",
-    "nerf_image_embedder",
-    "txt_in",
-]
-NERF_LAYER_KEYNAMES_SMALL = [
-    "distilled_guidance_layer",
-    "nerf_blocks",
-    "nerf_image_embedder",
-]
+NERF_LAYER_KEYNAMES_LARGE = ["distilled_guidance_layer", "nerf_blocks", "nerf_image_embedder", "txt_in"]
+NERF_LAYER_KEYNAMES_SMALL = ["distilled_guidance_layer", "nerf_blocks", "nerf_image_embedder"]
 RADIANCE_LAYER_KEYNAMES = ["img_in_patch", "nerf_final_layer_conv", "__x0__"]
 WAN_LAYER_KEYNAMES = [
     "text_embedding",
@@ -112,14 +91,7 @@ WAN_LAYER_KEYNAMES = [
     "face_adapter",
     "audio_injector",
 ]
-QWEN_LAYER_KEYNAMES = [
-    "time_text_embed",
-    "img_in",
-    "norm_out",
-    "proj_out",
-    "transformer_blocks.0.img_mod.1",
-    "txt_in",
-]
+QWEN_LAYER_KEYNAMES = ["time_text_embed", "img_in", "norm_out", "proj_out", "transformer_blocks.0.img_mod.1", "txt_in"]
 ZIMAGE_LAYER_KEYNAMES = [
     "x_embedder",
     "clip_text_pooled_proj",
@@ -201,20 +173,13 @@ MODEL_FILTERS = {
         "exclude": AVOID_KEY_NAMES,
         "remove": T5XXL_REMOVE_KEY_NAMES,
     },
-    "mistral": {
-        "help": "Mistral text encoder exclusions",
-        "category": "text",
-        "exclude": AVOID_KEY_NAMES,
-    },
+    "mistral": {"help": "Mistral text encoder exclusions", "category": "text", "exclude": AVOID_KEY_NAMES},
     "visual": {
         "help": "Visual encoder: skip MLP layers (down/up/gate proj)",
         "category": "text",
         "exclude": VISUAL_AVOID_KEY_NAMES,
     },
-    "generic_text": {
-        "help": "Generic text encoder: skip MLP layers (down/up/gate proj)",
-        "category": "text",
-    },
+    "generic_text": {"help": "Generic text encoder: skip MLP layers (down/up/gate proj)", "category": "text"},
     # Diffusion Models (Flux-style)
     "anima": {
         "help": "Anima diffusion model: keep first blocks, adaln_modulation, final/embedding layers high-precision",

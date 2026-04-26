@@ -8,6 +8,7 @@ Uses comfy-kitchen CUDA/Triton kernels when available, with PyTorch fallback.
 
 Requires SM >= 10.0 (datacenter Blackwell) or SM >= 12.0 (consumer RTX 50 series).
 """
+
 import gc
 import math
 from typing import Tuple, Optional, Dict
@@ -16,12 +17,7 @@ import torch
 from torch.optim import AdamW, RAdam
 from tqdm import tqdm
 
-from ..constants import (
-    FP4_E2M1_MAX,
-    FP4_BLOCK_SIZE,
-    COMPUTE_DTYPE,
-    SCALE_DTYPE,
-)
+from ..constants import FP4_E2M1_MAX, FP4_BLOCK_SIZE, COMPUTE_DTYPE, SCALE_DTYPE
 from ..utils.float_utils import (
     F8_E4M3_MAX,
     roundup,
@@ -42,9 +38,11 @@ from .base_converter import BaseLearnedConverter
 # Check for comfy-kitchen availability
 try:
     import comfy_kitchen as ck
+
     HAS_COMFY_KITCHEN = True
 except ImportError:
     HAS_COMFY_KITCHEN = False
+
 
 class LearnedNVFP4Converter(BaseLearnedConverter):
     """
@@ -146,9 +144,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
             padded_rows = roundup(rows, 16)
             padded_cols = roundup(cols, 16)
             if padded_rows != rows or padded_cols != cols:
-                W_float32 = torch.nn.functional.pad(
-                    W_float32, (0, padded_cols - cols, 0, padded_rows - rows)
-                )
+                W_float32 = torch.nn.functional.pad(W_float32, (0, padded_cols - cols, 0, padded_rows - rows))
 
         # Validate dimensions
         M, N = W_float32.shape
@@ -182,17 +178,14 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         # Note: If scales were updated during optimization, we need to recompute the FP8 representation
         if self.scale_refinement_rounds > 1 and not self.no_learned_rounding:
             # Extract block scales from final_total_scale
-            scaled_block_scales_fp8 = (final_total_scale / per_tensor_scale)
+            scaled_block_scales_fp8 = final_total_scale / per_tensor_scale
             scaled_block_scales_fp8 = torch.clamp(scaled_block_scales_fp8, max=F8_E4M3_MAX)
 
         # Pack to uint8
         data_packed = pack_uint4(qdata)
 
         # Convert block scales to cuBLAS tiled layout
-        blocked_scales = to_blocked(
-            scaled_block_scales_fp8.to(torch.float8_e4m3fn),
-            flatten=False
-        )
+        blocked_scales = to_blocked(scaled_block_scales_fp8.to(torch.float8_e4m3fn), flatten=False)
 
         # Dequantize for bias correction / output
         dequantized = self._dequantize(qdata, final_total_scale, W_float32.shape)
@@ -240,7 +233,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         total_scale = per_tensor_scale * scaled_block_scales_fp32
 
         # Handle zero blocks (from padding): avoid 0/0 NaN
-        zero_scale_mask = (total_scale == 0)
+        zero_scale_mask = total_scale == 0
 
         return scaled_block_scales_fp8, total_scale, zero_scale_mask
 
@@ -284,9 +277,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         qdata = _f32_to_floatx_unpacked(data_scaled.float(), F4_E2M1_EBITS, F4_E2M1_MBITS)
         return qdata
 
-    def _dequantize(
-        self, qdata: torch.Tensor, total_scale: torch.Tensor, orig_shape: tuple
-    ) -> torch.Tensor:
+    def _dequantize(self, qdata: torch.Tensor, total_scale: torch.Tensor, orig_shape: tuple) -> torch.Tensor:
         """Dequantize FP4 data to float."""
         M, N = orig_shape
 
@@ -300,7 +291,10 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         return dequantized.view(M, N).to(COMPUTE_DTYPE)
 
     def _optimize_nvfp4(
-        self, W_float32: torch.Tensor, total_scale: torch.Tensor, zero_scale_mask: torch.Tensor,
+        self,
+        W_float32: torch.Tensor,
+        total_scale: torch.Tensor,
+        zero_scale_mask: torch.Tensor,
         per_tensor_scale: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Apply learned rounding optimization for NVFP4.
@@ -417,7 +411,6 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
 
         schedule_name = self.lr_schedule
 
-
         # Shape-aware plateau parameters
         aspect_ratio = max(M, N) / min(M, N)
         if schedule_name == "plateau" and self.lr_shape_influence > 0:
@@ -425,7 +418,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
             blend = self.lr_shape_influence
             effective_patience = self.lr_patience
             raw_factor = self.lr_factor
-            aggressive_factor = raw_factor ** ar_factor
+            aggressive_factor = raw_factor**ar_factor
             effective_factor = raw_factor + (aggressive_factor - raw_factor) * blend
             effective_cooldown = self.lr_cooldown
         else:
@@ -520,8 +513,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
                 # Use counter before reset for boost calculation to prevent compounding
                 counter_for_update = prev_worse_counter if improved else worse_loss_counter
                 new_lr, lr_updated = self._adaptive_lr_update_cosine(
-                    curr_lr, improved, counter_for_update, i,
-                    (M, N), self.early_stop_lr
+                    curr_lr, improved, counter_for_update, i, (M, N), self.early_stop_lr
                 )
                 if lr_updated:
                     curr_lr = new_lr
@@ -530,12 +522,14 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
                 if improved and self.lr_adaptive_mode == "no-reset":
                     worse_loss_counter = 0
 
-            pbar.set_postfix({
-                "loss": f"{current_loss:.3e}",
-                "best": f"{best_loss:.3e}",
-                "lr": f"{curr_lr:.2e}",
-                "worse_count": f"{worse_loss_counter}",
-            })
+            pbar.set_postfix(
+                {
+                    "loss": f"{current_loss:.3e}",
+                    "best": f"{best_loss:.3e}",
+                    "lr": f"{curr_lr:.2e}",
+                    "worse_count": f"{worse_loss_counter}",
+                }
+            )
 
             # Early stopping
             if self._check_early_stop(current_loss, curr_lr, worse_loss_counter):
@@ -617,9 +611,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         cooldown_counter = 0
 
         # Shape-aware plateau parameters
-        effective_patience, effective_factor, effective_cooldown = (
-            self._compute_shape_aware_plateau_params(M, N)
-        )
+        effective_patience, effective_factor, effective_cooldown = self._compute_shape_aware_plateau_params(M, N)
 
         mode_suffix = f"-{self.scale_optimization}" if self.scale_optimization != "fixed" else ""
         pbar = tqdm(
@@ -688,8 +680,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
                 # Use counter before reset for boost calculation to prevent compounding
                 counter_for_update = prev_worse_counter if improved else worse_loss_counter
                 new_lr, lr_updated = self._adaptive_lr_update_cosine(
-                    curr_lr, improved, counter_for_update, i,
-                    (M, N), self.early_stop_lr
+                    curr_lr, improved, counter_for_update, i, (M, N), self.early_stop_lr
                 )
                 if lr_updated:
                     curr_lr = new_lr
@@ -701,19 +692,23 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
                     worse_loss_counter = 0
 
             if schedule_name == "plateau":
-                pbar.set_postfix({
-                    "loss": f"{current_loss_val:.3e}",
-                    "best": f"{best_loss:.3e}",
-                    "lr": f"{curr_lr:.2e}",
-                    "plateau": f"{plateau_counter}/{effective_patience}",
-                })
+                pbar.set_postfix(
+                    {
+                        "loss": f"{current_loss_val:.3e}",
+                        "best": f"{best_loss:.3e}",
+                        "lr": f"{curr_lr:.2e}",
+                        "plateau": f"{plateau_counter}/{effective_patience}",
+                    }
+                )
             else:
-                pbar.set_postfix({
-                    "loss": f"{current_loss_val:.3e}",
-                    "best": f"{best_loss:.3e}",
-                    "lr": f"{curr_lr:.2e}",
-                    "worse_count": f"{worse_loss_counter}",
-                })
+                pbar.set_postfix(
+                    {
+                        "loss": f"{current_loss_val:.3e}",
+                        "best": f"{best_loss:.3e}",
+                        "lr": f"{curr_lr:.2e}",
+                        "worse_count": f"{worse_loss_counter}",
+                    }
+                )
 
             if self._check_early_stop(best_loss, curr_lr, worse_loss_counter):
                 break
@@ -771,9 +766,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         cooldown_counter = 0
 
         # Shape-aware plateau parameters
-        effective_patience, effective_factor, effective_cooldown = (
-            self._compute_shape_aware_plateau_params(M, N)
-        )
+        effective_patience, effective_factor, effective_cooldown = self._compute_shape_aware_plateau_params(M, N)
 
         mode_suffix = f"-{self.scale_optimization}" if self.scale_optimization != "fixed" else ""
         pbar = tqdm(
@@ -842,8 +835,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
                 # Use counter before reset for boost calculation to prevent compounding
                 counter_for_update = prev_worse_counter if improved else worse_loss_counter
                 new_lr, lr_updated = self._adaptive_lr_update_cosine(
-                    curr_lr, improved, counter_for_update, i,
-                    (M, N), self.early_stop_lr
+                    curr_lr, improved, counter_for_update, i, (M, N), self.early_stop_lr
                 )
                 if lr_updated:
                     curr_lr = new_lr
@@ -855,19 +847,23 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
                     worse_loss_counter = 0
 
             if schedule_name == "plateau":
-                pbar.set_postfix({
-                    "loss": f"{current_loss_val:.3e}",
-                    "best": f"{best_loss:.3e}",
-                    "lr": f"{curr_lr:.2e}",
-                    "plateau": f"{plateau_counter}/{effective_patience}",
-                })
+                pbar.set_postfix(
+                    {
+                        "loss": f"{current_loss_val:.3e}",
+                        "best": f"{best_loss:.3e}",
+                        "lr": f"{curr_lr:.2e}",
+                        "plateau": f"{plateau_counter}/{effective_patience}",
+                    }
+                )
             else:
-                pbar.set_postfix({
-                    "loss": f"{current_loss_val:.3e}",
-                    "best": f"{best_loss:.3e}",
-                    "lr": f"{curr_lr:.2e}",
-                    "worse_count": f"{worse_loss_counter}",
-                })
+                pbar.set_postfix(
+                    {
+                        "loss": f"{current_loss_val:.3e}",
+                        "best": f"{best_loss:.3e}",
+                        "lr": f"{curr_lr:.2e}",
+                        "worse_count": f"{worse_loss_counter}",
+                    }
+                )
 
             if self._check_early_stop(best_loss, curr_lr, worse_loss_counter):
                 break
@@ -878,8 +874,6 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         final_q = torch.clamp(final_q.detach(), -FP4_E2M1_MAX, FP4_E2M1_MAX)
         qdata = _f32_to_floatx_unpacked(final_q.float(), F4_E2M1_EBITS, F4_E2M1_MBITS)
         return qdata, best_total_scale
-
-
 
     def _optimize_prodigy(
         self,
@@ -907,7 +901,9 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         current_total_scale = total_scale.clone()
         if self.scale_optimization == "joint":
             block_scales_float = (total_scale / per_tensor_scale).clone().requires_grad_(True)
-            optimizer = ProdigyPlusScheduleFree([delta, block_scales_float], lr=curr_lr, use_schedulefree=False, use_speed=self.use_speed)
+            optimizer = ProdigyPlusScheduleFree(
+                [delta, block_scales_float], lr=curr_lr, use_schedulefree=False, use_speed=self.use_speed
+            )
             best_block_scales = block_scales_float.detach().clone()
         else:
             block_scales_float = None
@@ -922,9 +918,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         plateau_counter = 0
         cooldown_counter = 0
 
-        effective_patience, effective_factor, effective_cooldown = (
-            self._compute_shape_aware_plateau_params(M, N)
-        )
+        effective_patience, effective_factor, effective_cooldown = self._compute_shape_aware_plateau_params(M, N)
 
         mode_suffix = f"-{self.scale_optimization}" if self.scale_optimization != "fixed" else ""
         pbar = tqdm(
@@ -989,8 +983,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
             else:  # 'adaptive'
                 counter_for_update = prev_worse_counter if improved else worse_loss_counter
                 new_lr, lr_updated = self._adaptive_lr_update_cosine(
-                    curr_lr, improved, counter_for_update, i,
-                    (M, N), self.early_stop_lr
+                    curr_lr, improved, counter_for_update, i, (M, N), self.early_stop_lr
                 )
                 if lr_updated:
                     curr_lr = new_lr
@@ -1001,19 +994,23 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
                     worse_loss_counter = 0
 
             if schedule_name == "plateau":
-                pbar.set_postfix({
-                    "loss": f"{current_loss_val:.3e}",
-                    "best": f"{best_loss:.3e}",
-                    "lr": f"{curr_lr:.2e}",
-                    "plateau": f"{plateau_counter}/{effective_patience}",
-                })
+                pbar.set_postfix(
+                    {
+                        "loss": f"{current_loss_val:.3e}",
+                        "best": f"{best_loss:.3e}",
+                        "lr": f"{curr_lr:.2e}",
+                        "plateau": f"{plateau_counter}/{effective_patience}",
+                    }
+                )
             else:
-                pbar.set_postfix({
-                    "loss": f"{current_loss_val:.3e}",
-                    "best": f"{best_loss:.3e}",
-                    "lr": f"{curr_lr:.2e}",
-                    "worse_count": f"{worse_loss_counter}",
-                })
+                pbar.set_postfix(
+                    {
+                        "loss": f"{current_loss_val:.3e}",
+                        "best": f"{best_loss:.3e}",
+                        "lr": f"{curr_lr:.2e}",
+                        "worse_count": f"{worse_loss_counter}",
+                    }
+                )
 
             if self._check_early_stop(best_loss, curr_lr, worse_loss_counter):
                 break
@@ -1025,9 +1022,7 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
         qdata = _f32_to_floatx_unpacked(final_q.float(), F4_E2M1_EBITS, F4_E2M1_MBITS)
         return qdata, best_total_scale
 
-    def _check_early_stop(
-        self, current_loss: float, curr_lr: float, worse_loss_counter: int
-    ) -> bool:
+    def _check_early_stop(self, current_loss: float, curr_lr: float, worse_loss_counter: int) -> bool:
         """Check early stopping conditions."""
         if self.early_stop_loss > 0 and current_loss <= self.early_stop_loss:
             info("\n      - Loss is negligible. Stopping early.")
@@ -1039,4 +1034,3 @@ class LearnedNVFP4Converter(BaseLearnedConverter):
             info("\n      - Loss has stalled. Stopping early.")
             return True
         return False
-

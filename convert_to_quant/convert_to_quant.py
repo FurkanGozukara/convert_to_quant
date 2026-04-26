@@ -6,6 +6,7 @@ quantized formats with optional learned rounding optimization.
 
 Main entry point for CLI and programmatic usage.
 """
+
 # Re-export constants for backward compatibility
 from .constants import (
     AVOID_KEY_NAMES,
@@ -54,12 +55,7 @@ from .utils import (
 )
 
 # Re-export config
-from .config import (
-    pattern_specificity,
-    load_layer_config,
-    get_layer_settings,
-    generate_config_template,
-)
+from .config import pattern_specificity, load_layer_config, get_layer_settings, generate_config_template
 
 # Re-export converters
 from .converters import LearnedRoundingConverter
@@ -133,7 +129,8 @@ __all__ = [
     "cleanup_fp8_scaled",
     # CLI
     "main",
-]
+]
+
 
 if __name__ == "__main__":
     main()

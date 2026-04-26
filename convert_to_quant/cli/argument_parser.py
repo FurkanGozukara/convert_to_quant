@@ -4,6 +4,7 @@ CLI argument parser for convert_to_quant.
 Provides MultiHelpArgumentParser with categorized help sections
 for experimental, filter, and advanced options.
 """
+
 import argparse
 import sys
 
@@ -105,14 +106,7 @@ MODES_ARGS = {
     "full_precision_mm",
 }
 
-LORA_ARGS = {
-    "extract_lora",
-    "lora_rank",
-    "lora_target",
-    "lora_depth",
-    "lora_ar_threshold",
-    "lora_output",
-}
+LORA_ARGS = {"extract_lora", "lora_rank", "lora_target", "lora_depth", "lora_ar_threshold", "lora_output"}
 
 
 class MultiHelpArgumentParser(argparse.ArgumentParser):
@@ -176,9 +170,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
     def _format_action_help(self, action):
         """Format a single action for help output."""
         # Get option strings
-        opts = (
-            ", ".join(action.option_strings) if action.option_strings else action.dest
-        )
+        opts = ", ".join(action.option_strings) if action.option_strings else action.dest
 
         # Get help text
         help_text = action.help or ""
@@ -330,10 +322,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
 
         for cat_key, cat_name in categories.items():
             # Get filters in this category
-            cat_filters = [
-                name for name, cfg in MODEL_FILTERS.items()
-                if cfg.get("category") == cat_key
-            ]
+            cat_filters = [name for name, cfg in MODEL_FILTERS.items() if cfg.get("category") == cat_key]
             if not cat_filters:
                 continue
 
@@ -388,11 +377,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         print("LR Schedule (Adaptive):")
         print("-" * 40)
 
-        adaptive_args = [
-            "lr_adaptive_mode",
-            "lr_factor",
-            "lr_cooldown",
-        ]
+        adaptive_args = ["lr_adaptive_mode", "lr_factor", "lr_cooldown"]
         for action in self._all_actions:
             if self._get_dest_name(action) in adaptive_args:
                 line = self._format_action_help(action)
@@ -423,7 +408,6 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
 
         print()
 
-
     def _print_modes_help(self):
         """Print help for conversion and utility modes."""
         print("Conversion & Utility Modes")
@@ -435,12 +419,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         print("Format Conversion:")
         print("-" * 40)
 
-        conversion_args = [
-            "convert_fp8_scaled",
-            "hp_filter",
-            "full_precision_mm",
-            "convert_int8_scaled",
-        ]
+        conversion_args = ["convert_fp8_scaled", "hp_filter", "full_precision_mm", "convert_int8_scaled"]
         for action in self._all_actions:
             if self._get_dest_name(action) in conversion_args:
                 line = self._format_action_help(action)
@@ -473,14 +452,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         print("Activation Scale Calibration:")
         print("-" * 40)
 
-        actcal_args = [
-            "actcal",
-            "actcal_samples",
-            "actcal_percentile",
-            "actcal_lora",
-            "actcal_seed",
-            "actcal_device",
-        ]
+        actcal_args = ["actcal", "actcal_samples", "actcal_percentile", "actcal_lora", "actcal_seed", "actcal_device"]
         for action in self._all_actions:
             if self._get_dest_name(action) in actcal_args:
                 line = self._format_action_help(action)
@@ -522,14 +494,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         print("LoRA Extraction Settings:")
         print("-" * 40)
 
-        lora_args_list = [
-            "extract_lora",
-            "lora_rank",
-            "lora_target",
-            "lora_depth",
-            "lora_ar_threshold",
-            "lora_output",
-        ]
+        lora_args_list = ["extract_lora", "lora_rank", "lora_target", "lora_depth", "lora_ar_threshold", "lora_output"]
         for action in self._all_actions:
             if self._get_dest_name(action) in lora_args_list:
                 line = self._format_action_help(action)
@@ -557,9 +522,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
                 standard_actions.append(action)
 
         # Add usage with only standard actions
-        formatter.add_usage(
-            self.usage, standard_actions, self._mutually_exclusive_groups
-        )
+        formatter.add_usage(self.usage, standard_actions, self._mutually_exclusive_groups)
 
         # Add description
         formatter.add_text(self.description)
@@ -572,42 +535,18 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         # Add section hints
         formatter.add_text("")
         formatter.add_text("Additional Help Sections:")
-        formatter.add_text(
-            "  --help-learned, -hl         Show learned rounding optimization options"
-        )
-        formatter.add_text(
-            "                              (optimizer, num_iter, lr, top_p, etc.)"
-        )
-        formatter.add_text(
-            "  --help-experimental, -he    Show experimental quantization options"
-        )
-        formatter.add_text(
-            "                              (int8, nvfp4, mxfp8, custom-layers, etc.)"
-        )
-        formatter.add_text(
-            "  --help-filters, -hf         Show model-specific exclusion filters"
-        )
-        formatter.add_text(
-            "                              (t5xxl, hunyuan, wan, qwen, etc.)"
-        )
-        formatter.add_text(
-            "  --help-advanced, -ha        Show advanced LR tuning and early stopping"
-        )
-        formatter.add_text(
-            "                              (lr-gamma, lr-patience, early-stop-*, etc.)"
-        )
-        formatter.add_text(
-            "  --help-modes, -hm           Show conversion and utility modes"
-        )
-        formatter.add_text(
-            "                              (convert-fp8-scaled, actcal, edit-quant, etc.)"
-        )
-        formatter.add_text(
-            "  --help-lora, -hlr           Show Error Correction LoRA extraction options"
-        )
-        formatter.add_text(
-            "                              (extract-lora, lora-rank, lora-target, etc.)"
-        )
+        formatter.add_text("  --help-learned, -hl         Show learned rounding optimization options")
+        formatter.add_text("                              (optimizer, num_iter, lr, top_p, etc.)")
+        formatter.add_text("  --help-experimental, -he    Show experimental quantization options")
+        formatter.add_text("                              (int8, nvfp4, mxfp8, custom-layers, etc.)")
+        formatter.add_text("  --help-filters, -hf         Show model-specific exclusion filters")
+        formatter.add_text("                              (t5xxl, hunyuan, wan, qwen, etc.)")
+        formatter.add_text("  --help-advanced, -ha        Show advanced LR tuning and early stopping")
+        formatter.add_text("                              (lr-gamma, lr-patience, early-stop-*, etc.)")
+        formatter.add_text("  --help-modes, -hm           Show conversion and utility modes")
+        formatter.add_text("                              (convert-fp8-scaled, actcal, edit-quant, etc.)")
+        formatter.add_text("  --help-lora, -hlr           Show Error Correction LoRA extraction options")
+        formatter.add_text("                              (extract-lora, lora-rank, lora-target, etc.)")
         # Add epilog
         formatter.add_text(self.epilog)
 

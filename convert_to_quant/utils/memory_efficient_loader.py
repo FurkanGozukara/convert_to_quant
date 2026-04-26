@@ -3,6 +3,7 @@ Unified safetensors loader with optional memory-efficient mode.
 
 Provides a consistent interface for tensor loading regardless of mode.
 """
+
 import gc
 import mmap
 import json
@@ -10,6 +11,7 @@ import struct
 import torch
 from safetensors import safe_open
 from typing import Dict, Optional
+
 
 class UnifiedSafetensorsLoader:
     """Unified safetensors loader supporting both preload and streaming modes.
@@ -61,6 +63,7 @@ class UnifiedSafetensorsLoader:
                 self._all_keys = list(f.keys())
                 print(f"Loading {len(self._all_keys)} tensors from source file...")
                 from tqdm import tqdm
+
                 for key in tqdm(self._all_keys, desc="Loading tensors"):
                     self._tensors[key] = f.get_tensor(key)
 

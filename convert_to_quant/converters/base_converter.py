@@ -5,6 +5,7 @@ Provides shared infrastructure for LearnedRoundingConverter (FP8/INT8)
 and LearnedNVFP4Converter (NVFP4). Contains common initialization,
 SVD computation, LR scheduling, and early stopping logic.
 """
+
 import gc
 import math
 import re
@@ -110,7 +111,9 @@ class BaseLearnedConverter(ABC):
             try:
                 import prodigyplus.prodigy_plus_schedulefree
             except ImportError:
-                raise ImportError("User needs to run `pip install prodigy-plus-schedule-free` to use the prodigy optimizer.")
+                raise ImportError(
+                    "User needs to run `pip install prodigy-plus-schedule-free` to use the prodigy optimizer."
+                )
 
         self.num_iter = num_iter
         self.lr = lr
@@ -143,10 +146,12 @@ class BaseLearnedConverter(ABC):
         self.lora_target_regex = None
         if lora_target:
             import re
+
             try:
                 self.lora_target_regex = re.compile(lora_target)
             except re.error:
                 from ..utils.logging import warning
+
                 warning(f"      [LoRA] Invalid target regex '{lora_target}', ignoring.")
 
     def _should_extract_lora(self, key: str, shape: torch.Size, depth: int = -1) -> bool:
@@ -171,7 +176,8 @@ class BaseLearnedConverter(ABC):
         if block_idx == -1:
             # Try to extract from key if not provided
             import re
-            block_match = re.search(r'\.(\d+)\.', key)
+
+            block_match = re.search(r"\.(\d+)\.", key)
             if block_match:
                 block_idx = int(block_match.group(1))
 
@@ -245,6 +251,7 @@ class BaseLearnedConverter(ABC):
                 }
             except Exception as e:
                 from ..utils.logging import warning
+
                 warning(f"      [LoRA] SVD failed for error extraction: {e}")
                 return None
 
@@ -378,9 +385,7 @@ class BaseLearnedConverter(ABC):
             new_lr = max(curr_lr * decay_mult, min_lr)
             return new_lr, True
 
-    def _compute_shape_aware_plateau_params(
-        self, M: int, N: int
-    ) -> Tuple[int, float, int]:
+    def _compute_shape_aware_plateau_params(self, M: int, N: int) -> Tuple[int, float, int]:
         """
         Compute shape-aware parameters for plateau LR schedule.
 
@@ -398,7 +403,7 @@ class BaseLearnedConverter(ABC):
 
             effective_patience = self.lr_patience
             raw_factor = self.lr_factor
-            aggressive_factor = raw_factor ** ar_factor
+            aggressive_factor = raw_factor**ar_factor
             effective_factor = raw_factor + (aggressive_factor - raw_factor) * blend
             effective_cooldown = self.lr_cooldown
         else:
@@ -408,9 +413,7 @@ class BaseLearnedConverter(ABC):
 
         return effective_patience, effective_factor, effective_cooldown
 
-    def _check_improvement(
-        self, current_loss: float, best_loss: float
-    ) -> bool:
+    def _check_improvement(self, current_loss: float, best_loss: float) -> bool:
         """
         Check if current loss is a significant improvement.
 

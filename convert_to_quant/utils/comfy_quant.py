@@ -3,6 +3,7 @@ ComfyUI quantization metadata utilities for convert_to_quant.
 
 Handles .comfy_quant tensor creation, parsing, editing, and performance heuristics.
 """
+
 import json
 import os
 import re
@@ -17,15 +18,11 @@ from .logging import info, verbose, warning, error, minimal
 
 
 # Block-based formats that require group_size
-BLOCK_BASED_FORMATS = (
-    "int8_blockwise",
-    "float8_e4m3fn_blockwise",
-)
+BLOCK_BASED_FORMATS = ("int8_blockwise", "float8_e4m3fn_blockwise")
+
 
 def create_comfy_quant_tensor(
-    format_type: str,
-    block_size: Optional[int] = None,
-    full_precision_matrix_mult: Optional[bool] = None,
+    format_type: str, block_size: Optional[int] = None, full_precision_matrix_mult: Optional[bool] = None
 ) -> torch.Tensor:
     """
     Create a .comfy_quant layer configuration tensor for ComfyUI.
@@ -51,9 +48,8 @@ def create_comfy_quant_tensor(
 
     return dict_to_tensor(comfy_quant)
 
-def fix_comfy_quant_params_structure(
-    comfy_quant_tensor: torch.Tensor,
-) -> Tuple[torch.Tensor, bool]:
+
+def fix_comfy_quant_params_structure(comfy_quant_tensor: torch.Tensor) -> Tuple[torch.Tensor, bool]:
     """
     Check and fix comfy_quant config with incorrect nested params structure.
 
@@ -88,6 +84,7 @@ def fix_comfy_quant_params_structure(
                 config[key] = value
 
     return dict_to_tensor(config), True
+
 
 def parse_add_keys_string(add_keys_str: str) -> Dict[str, Any]:
     """
@@ -133,6 +130,7 @@ def parse_add_keys_string(add_keys_str: str) -> Dict[str, Any]:
                 result[key] = value
 
     return result
+
 
 def edit_comfy_quant(
     input_file: str,
@@ -198,10 +196,7 @@ def edit_comfy_quant(
     if existing_metadata and "_quantization_metadata" in existing_metadata:
         try:
             quant_metadata = json.loads(existing_metadata["_quantization_metadata"])
-            info(
-                f"Found _quantization_metadata header with "
-                f"{len(quant_metadata.get('layers', {}))} layer entries"
-            )
+            info(f"Found _quantization_metadata header with {len(quant_metadata.get('layers', {}))} layer entries")
         except json.JSONDecodeError as e:
             warning(f"  WARNING: Failed to parse _quantization_metadata: {e}")
             quant_metadata = None
@@ -270,9 +265,7 @@ def edit_comfy_quant(
                     for k in remove_keys:
                         if k in meta_entry:
                             del meta_entry[k]
-                            metadata_keys_removed[k] = (
-                                metadata_keys_removed.get(k, 0) + 1
-                            )
+                            metadata_keys_removed[k] = metadata_keys_removed.get(k, 0) + 1
 
                 # Add keys to metadata entry
                 if add_keys:
@@ -434,10 +427,7 @@ def edit_comfy_quant(
     # Save output
     info(f"\nSaving to {output_file}...")
     try:
-        os.makedirs(
-            os.path.dirname(output_file) if os.path.dirname(output_file) else ".",
-            exist_ok=True,
-        )
+        os.makedirs(os.path.dirname(output_file) if os.path.dirname(output_file) else ".", exist_ok=True)
         # Normalize any 1-element scale tensors to scalars
         tensors, normalized_count = normalize_tensorwise_scales(tensors, NORMALIZE_SCALES_ENABLED)
         if normalized_count > 0:
@@ -449,9 +439,8 @@ def edit_comfy_quant(
         error(f"FATAL: Error saving file '{output_file}': {e}")
         return
 
-def should_skip_layer_for_performance(
-    tensor: torch.Tensor, block_size: int
-) -> Tuple[bool, str]:
+
+def should_skip_layer_for_performance(tensor: torch.Tensor, block_size: int) -> Tuple[bool, str]:
     """
     Check if a layer should be skipped based on performance heuristics.
 

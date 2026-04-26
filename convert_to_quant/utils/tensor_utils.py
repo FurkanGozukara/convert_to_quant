@@ -3,9 +3,11 @@ Tensor utility functions for convert_to_quant.
 
 Provides serialization helpers for dictionary/tensor conversion and scale normalization.
 """
+
 import json
 import torch
 from typing import Dict, Tuple
+
 
 def dict_to_tensor(data_dict: dict) -> torch.Tensor:
     """
@@ -22,6 +24,7 @@ def dict_to_tensor(data_dict: dict) -> torch.Tensor:
     tensor_data = torch.tensor(list(byte_data), dtype=torch.uint8)
     return tensor_data
 
+
 def tensor_to_dict(tensor_data: torch.Tensor) -> dict:
     """
     Convert a torch.uint8 tensor containing JSON bytes to a dictionary.
@@ -37,9 +40,9 @@ def tensor_to_dict(tensor_data: torch.Tensor) -> dict:
     data_dict = json.loads(json_str)
     return data_dict
 
+
 def normalize_tensorwise_scales(
-    tensors: Dict[str, torch.Tensor],
-    enabled: bool = True,
+    tensors: Dict[str, torch.Tensor], enabled: bool = True
 ) -> Tuple[Dict[str, torch.Tensor], int]:
     """
     Normalize 1-element scale tensors to scalars in-place.
@@ -69,6 +72,7 @@ def normalize_tensorwise_scales(
                 normalized_count += 1
 
     return tensors, normalized_count
+
 
 def generate_calibration_data(
     tensors: Dict[str, torch.Tensor],
@@ -103,11 +107,7 @@ def generate_calibration_data(
             in_features = tensor.shape[1]
             if in_features not in calibration_data_cache:
                 calibration_data_cache[in_features] = torch.randn(
-                    calib_samples,
-                    in_features,
-                    dtype=compute_dtype,
-                    generator=seed_generator,
-                    device=device,
+                    calib_samples, in_features, dtype=compute_dtype, generator=seed_generator, device=device
                 )
 
     return calibration_data_cache
