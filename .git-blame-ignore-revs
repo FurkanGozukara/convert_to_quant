@@ -1,0 +1,10 @@
+# Git Blame Ignore Revisions
+# This file lists commits that are purely structural/formatting changes
+# which should be ignored by git blame to preserve the original authorship.
+
+# Unauthorized formatting pass (Ruff defaults)
+6b872387902876dc516e0d507e39276ae61d78fc
+25ef5ed3304c1ae14038d2d5b3ac653c33af4945
+
+# Compactness cleanup (Ruff configuration update)
+e885f4b3ae44f5f94cf89800ce11e54011c47fa5
