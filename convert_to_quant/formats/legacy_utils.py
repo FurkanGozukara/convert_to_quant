@@ -7,15 +7,16 @@ Handles legacy fp8_scaled format cleanup and input_scale addition.
 import gc
 import json
 import os
+from typing import Any, Dict
+
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
-from typing import Dict, Any
 from tqdm import tqdm
 
-from ..constants import TARGET_FP8_DTYPE, SCALE_DTYPE, NORMALIZE_SCALES_ENABLED
+from ..constants import NORMALIZE_SCALES_ENABLED, SCALE_DTYPE, TARGET_FP8_DTYPE
+from ..utils.logging import debug, error, info, log_debug, minimal, verbose, warning
 from ..utils.tensor_utils import normalize_tensorwise_scales
-from ..utils.logging import info, verbose, debug, minimal, warning, error, log_debug
 
 
 def add_legacy_input_scale(input_file: str, output_file: str):

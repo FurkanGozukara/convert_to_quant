@@ -20,14 +20,14 @@ Real .safetensors files are written to CWD and cleaned up in tearDown.
 
 import os
 import unittest
+
 import torch
-from safetensors.torch import save_file, load_file
+from safetensors.torch import load_file, save_file
 
-from convert_to_quant.formats.fp8_conversion import convert_to_fp8_scaled
-from convert_to_quant.formats.nvfp4_conversion import convert_to_nvfp4
-from convert_to_quant.formats.mxfp8_conversion import convert_to_mxfp8
 from convert_to_quant.cli.main import extract_filter_flags
-
+from convert_to_quant.formats.fp8_conversion import convert_to_fp8_scaled
+from convert_to_quant.formats.mxfp8_conversion import convert_to_mxfp8
+from convert_to_quant.formats.nvfp4_conversion import convert_to_nvfp4
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -220,7 +220,6 @@ _MXFP8_KWARGS = dict(
     lora_ar_threshold=0.0,
 )
 
-
 # ---------------------------------------------------------------------------
 # Test class
 # ---------------------------------------------------------------------------
@@ -393,8 +392,9 @@ class TestFilterFlags(unittest.TestCase):
         """extract_filter_flags must set generic_text=True when qwen35 is set."""
         # Build a fake args namespace with all MODEL_FILTERS keys set to False
         # except qwen35
-        from convert_to_quant.constants import MODEL_FILTERS
         import types
+
+        from convert_to_quant.constants import MODEL_FILTERS
 
         ns = types.SimpleNamespace()
         for name in MODEL_FILTERS.keys():
@@ -408,8 +408,9 @@ class TestFilterFlags(unittest.TestCase):
 
     def test_extract_filter_flags_no_alias_without_qwen35(self):
         """generic_text must NOT be injected when qwen35 is not set."""
-        from convert_to_quant.constants import MODEL_FILTERS
         import types
+
+        from convert_to_quant.constants import MODEL_FILTERS
 
         ns = types.SimpleNamespace()
         for name in MODEL_FILTERS.keys():

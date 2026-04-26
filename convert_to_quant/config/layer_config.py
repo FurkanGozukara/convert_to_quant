@@ -7,8 +7,9 @@ Provides regex-based layer pattern matching for per-layer quantization settings.
 import json
 import os
 import re
+from typing import Any, Dict, Optional, Tuple
+
 import torch
-from typing import Dict, Any, Optional, Tuple
 from safetensors import safe_open
 from tqdm import tqdm
 

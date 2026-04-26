@@ -5,8 +5,9 @@ Pinned (page-locked) memory enables faster DMA transfers to GPU.
 Uses PyTorch's native pin_memory() with non_blocking transfers.
 """
 
-import torch
 from typing import Optional
+
+import torch
 
 # Module-level configuration
 _verbose = False

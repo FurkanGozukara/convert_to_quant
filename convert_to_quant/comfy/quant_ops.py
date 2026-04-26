@@ -1,23 +1,25 @@
-import torch
 import logging
-from typing import Tuple, Dict
-from . import float as comfy_float  # Aliased to match ComfyUI's comfy.float usage
+from typing import Dict, Tuple
+
+import torch
+
+from . import (
+    float as comfy_float,  # Aliased to match ComfyUI's comfy.float usage
+)
 
 _LAYOUT_REGISTRY = {}
 _GENERIC_UTILS = {}
 
 # Try to import Triton-based INT8 kernels
 try:
-    from .int8_kernels import (
-        act_quant as triton_act_quant,
-        act_dequant as triton_act_dequant,
-        weight_quant as triton_weight_quant,
-        weight_dequant as triton_weight_dequant,
-        int8_gemm as triton_int8_gemm,
-        int8_addmm as triton_int8_addmm,
-        int8_gemm_quant as triton_int8_gemm_quant,
-        int8_addmm_quant as triton_int8_addmm_quant,
-    )
+    from .int8_kernels import act_dequant as triton_act_dequant
+    from .int8_kernels import act_quant as triton_act_quant
+    from .int8_kernels import int8_addmm as triton_int8_addmm
+    from .int8_kernels import int8_addmm_quant as triton_int8_addmm_quant
+    from .int8_kernels import int8_gemm as triton_int8_gemm
+    from .int8_kernels import int8_gemm_quant as triton_int8_gemm_quant
+    from .int8_kernels import weight_dequant as triton_weight_dequant
+    from .int8_kernels import weight_quant as triton_weight_quant
 
     _HAS_TRITON_INT8 = True
 except ImportError:
@@ -244,6 +246,7 @@ class QuantizedTensor(torch.Tensor):
 
     @classmethod
     def _dequant_and_fallback(cls, func, args, kwargs):
+
         def dequant_arg(arg):
             if isinstance(arg, QuantizedTensor):
                 return arg.dequantize()
@@ -951,7 +954,6 @@ QUANT_ALGOS = {
     },
     "int8_tensorwise": {"storage_t": torch.int8, "parameters": {"weight_scale", "input_scale"}, "comfy_tensor_layout": "TensorWiseINT8Layout"},
 }
-
 
 LAYOUTS = {"TensorCoreFP8Layout": TensorCoreFP8Layout, "RowWiseFP8Layout": RowWiseFP8Layout, "BlockWiseFP8Layout": BlockWiseFP8Layout, "BlockWiseINT8Layout": BlockWiseINT8Layout, "TensorWiseINT8Layout": TensorWiseINT8Layout}
 

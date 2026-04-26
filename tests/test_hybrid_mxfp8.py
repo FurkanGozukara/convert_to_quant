@@ -1,10 +1,12 @@
 import os
-import torch
 import unittest
-from safetensors.torch import save_file, load_file
+
+import torch
 from safetensors import safe_open
+from safetensors.torch import load_file, save_file
+
 from convert_to_quant.formats.hybrid_mxfp8_conversion import convert_to_hybrid_mxfp8
-from convert_to_quant.utils.comfy_quant import edit_comfy_quant, create_comfy_quant_tensor, tensor_to_dict
+from convert_to_quant.utils.comfy_quant import create_comfy_quant_tensor, edit_comfy_quant, tensor_to_dict
 
 
 class TestHybridMXFP8(unittest.TestCase):

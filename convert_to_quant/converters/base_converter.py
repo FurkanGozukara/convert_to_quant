@@ -10,7 +10,7 @@ import gc
 import math
 import re
 from abc import ABC, abstractmethod
-from typing import Tuple, Optional, Dict
+from typing import Dict, Optional, Tuple
 
 import torch
 

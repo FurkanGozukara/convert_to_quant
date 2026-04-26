@@ -1,6 +1,6 @@
+import functools
 import logging
 import sys
-import functools
 
 # Custom Levels
 # MINIMAL (30): WARNING+ (Reduced)

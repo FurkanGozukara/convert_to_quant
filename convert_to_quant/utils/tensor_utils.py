@@ -5,8 +5,9 @@ Provides serialization helpers for dictionary/tensor conversion and scale normal
 """
 
 import json
-import torch
 from typing import Dict, Tuple
+
+import torch
 
 
 def dict_to_tensor(data_dict: dict) -> torch.Tensor:

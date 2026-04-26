@@ -8,17 +8,17 @@ import gc
 import json
 import os
 import re
+from typing import Any, Dict, Optional
+
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
-from typing import Dict, Any, Optional
 from tqdm import tqdm
 
-
-from ..constants import TARGET_FP8_DTYPE, COMPUTE_DTYPE, SCALE_DTYPE, NORMALIZE_SCALES_ENABLED
-from ..utils.tensor_utils import dict_to_tensor, normalize_tensorwise_scales
+from ..constants import COMPUTE_DTYPE, NORMALIZE_SCALES_ENABLED, SCALE_DTYPE, TARGET_FP8_DTYPE
 from ..utils.comfy_quant import create_comfy_quant_tensor, fix_comfy_quant_params_structure
-from ..utils.logging import info, verbose, debug, minimal, warning, error, log_debug
+from ..utils.logging import debug, error, info, log_debug, minimal, verbose, warning
+from ..utils.tensor_utils import dict_to_tensor, normalize_tensorwise_scales
 
 
 def convert_fp8_scaled_to_comfy_quant(input_file: str, output_file: str, hp_filter: Optional[str] = None, full_precision_mm: bool = False, include_input_scale: bool = False, save_quant_metadata: bool = True):

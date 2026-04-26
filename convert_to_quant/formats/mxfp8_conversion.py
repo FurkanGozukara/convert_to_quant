@@ -10,18 +10,19 @@ Use --simple to switch to raw MXFP8Converter.
 
 import gc
 import os
+from typing import Dict, Optional
+
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
-from typing import Dict, Optional
 
-from ..constants import AVOID_KEY_NAMES, MODEL_FILTERS, MXFP8_BLOCK_SIZE, MXFP8_DTYPE, NORMALIZE_SCALES_ENABLED, COMPUTE_DTYPE
-from ..converters.mxfp8_converter import MXFP8Converter
+from ..constants import AVOID_KEY_NAMES, COMPUTE_DTYPE, MODEL_FILTERS, MXFP8_BLOCK_SIZE, MXFP8_DTYPE, NORMALIZE_SCALES_ENABLED
 from ..converters.learned_mxfp8 import LearnedMXFP8Converter
-from ..utils.tensor_utils import dict_to_tensor, normalize_tensorwise_scales
+from ..converters.mxfp8_converter import MXFP8Converter
 from ..utils.comfy_quant import should_skip_layer_for_performance
+from ..utils.logging import debug, error, info, log_debug, minimal, verbose, warning
 from ..utils.memory_efficient_loader import UnifiedSafetensorsLoader
-from ..utils.logging import info, verbose, debug, minimal, warning, error, log_debug
+from ..utils.tensor_utils import dict_to_tensor, normalize_tensorwise_scales
 
 
 @log_debug

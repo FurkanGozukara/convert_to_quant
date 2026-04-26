@@ -9,22 +9,23 @@ import gc
 import json
 import os
 import re
+from typing import Any, Dict, Optional
+
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
-from typing import Dict, Any, Optional
 from tqdm import tqdm
 
-from ..constants import TARGET_FP8_DTYPE, TARGET_INT8_DTYPE, COMPUTE_DTYPE, SCALE_DTYPE, FP8_MIN, FP8_MAX, INT8_SYMMETRIC_MAX, AVOID_KEY_NAMES, T5XXL_REMOVE_KEY_NAMES, MODEL_FILTERS, VALID_QUANT_FORMATS, NORMALIZE_SCALES_ENABLED
-from ..converters.learned_rounding import LearnedRoundingConverter
+from ..config.layer_config import get_layer_settings
+from ..constants import AVOID_KEY_NAMES, COMPUTE_DTYPE, FP8_MAX, FP8_MIN, INT8_SYMMETRIC_MAX, MODEL_FILTERS, NORMALIZE_SCALES_ENABLED, SCALE_DTYPE, T5XXL_REMOVE_KEY_NAMES, TARGET_FP8_DTYPE, TARGET_INT8_DTYPE, VALID_QUANT_FORMATS
 from ..converters.learned_mxfp8 import LearnedMXFP8Converter
 from ..converters.learned_nvfp4 import LearnedNVFP4Converter
-from ..config.layer_config import get_layer_settings
-from ..utils.tensor_utils import normalize_tensorwise_scales
-from ..utils.comfy_quant import create_comfy_quant_tensor, should_skip_layer_for_performance
-from ..utils.memory_efficient_loader import MemoryEfficientSafeOpen
+from ..converters.learned_rounding import LearnedRoundingConverter
 from ..pinned_transfer import get_pinned_transfer_stats
-from ..utils.logging import info, verbose, debug, minimal, warning, error, log_debug
+from ..utils.comfy_quant import create_comfy_quant_tensor, should_skip_layer_for_performance
+from ..utils.logging import debug, error, info, log_debug, minimal, verbose, warning
+from ..utils.memory_efficient_loader import MemoryEfficientSafeOpen
+from ..utils.tensor_utils import normalize_tensorwise_scales
 
 
 @log_debug
