@@ -36,11 +36,7 @@ from convert_to_quant.cli.main import extract_filter_flags
 
 def _has_quant_artifacts(tensors: dict, base: str) -> bool:
     """Return True if any quantization artifact exists for a given base name."""
-    return any(
-        k.startswith(base + ".") and k != base + ".weight"
-        for k in tensors
-        if k not in (base + ".weight", base + ".bias")
-    )
+    return any(k.startswith(base + ".") and k != base + ".weight" for k in tensors if k not in (base + ".weight", base + ".bias"))
 
 
 def _is_quantized(tensors: dict, base: str) -> bool:
@@ -247,32 +243,17 @@ class TestFilterFlags(unittest.TestCase):
 
     def _run_fp8(self, filter_flags, **extra):
         kw = {**_FP8_KWARGS, **extra}
-        convert_to_fp8_scaled(
-            self.input_file,
-            self.output_file,
-            filter_flags=filter_flags,
-            **kw,
-        )
+        convert_to_fp8_scaled(self.input_file, self.output_file, filter_flags=filter_flags, **kw)
         return load_file(self.output_file)
 
     def _run_nvfp4(self, filter_flags, **extra):
         kw = {**_NVFP4_KWARGS, **extra}
-        convert_to_nvfp4(
-            self.input_file,
-            self.output_file,
-            filter_flags=filter_flags,
-            **kw,
-        )
+        convert_to_nvfp4(self.input_file, self.output_file, filter_flags=filter_flags, **kw)
         return load_file(self.output_file)
 
     def _run_mxfp8(self, filter_flags, **extra):
         kw = {**_MXFP8_KWARGS, **extra}
-        convert_to_mxfp8(
-            self.input_file,
-            self.output_file,
-            filter_flags=filter_flags,
-            **kw,
-        )
+        convert_to_mxfp8(self.input_file, self.output_file, filter_flags=filter_flags, **kw)
         return load_file(self.output_file)
 
     # ------------------------------------------------------------------
@@ -284,13 +265,8 @@ class TestFilterFlags(unittest.TestCase):
         out = self._run_fp8({})
         for base in ("conv1d_layer", "conv2d_layer"):
             self.assertIn(f"{base}.weight", out, f"{base}.weight missing from output")
-            self.assertFalse(
-                _is_quantized(out, base), f"{base} should not be quantized (non-2D)"
-            )
-            self.assertFalse(
-                _has_comfy_quant(out, base),
-                f"{base} must not have comfy_quant (non-2D)",
-            )
+            self.assertFalse(_is_quantized(out, base), f"{base} should not be quantized (non-2D)")
+            self.assertFalse(_has_comfy_quant(out, base), f"{base} must not have comfy_quant (non-2D)")
 
     def test_nvfp4_non2d_never_quantized(self):
         out = self._run_nvfp4({})
@@ -329,152 +305,84 @@ class TestFilterFlags(unittest.TestCase):
 
     def test_fp8_normal_layers_quantized(self):
         out = self._run_fp8({})
-        for base in (
-            "transformer.blocks.2.attn.qkv",
-            "transformer.blocks.2.mlp.fc1",
-            "net.blocks.2.attn",
-        ):
+        for base in ("transformer.blocks.2.attn.qkv", "transformer.blocks.2.mlp.fc1", "net.blocks.2.attn"):
             self.assertTrue(_is_quantized(out, base), f"{base} should be quantized")
-            self.assertTrue(
-                _has_comfy_quant(out, base), f"{base} should have comfy_quant"
-            )
+            self.assertTrue(_has_comfy_quant(out, base), f"{base} should have comfy_quant")
 
     def test_nvfp4_normal_layers_quantized(self):
         out = self._run_nvfp4({})
-        for base in (
-            "transformer.blocks.2.attn.qkv",
-            "transformer.blocks.2.mlp.fc1",
-        ):
-            self.assertTrue(
-                _is_quantized(out, base), f"{base} should be quantized (nvfp4)"
-            )
+        for base in ("transformer.blocks.2.attn.qkv", "transformer.blocks.2.mlp.fc1"):
+            self.assertTrue(_is_quantized(out, base), f"{base} should be quantized (nvfp4)")
             self.assertTrue(_has_comfy_quant(out, base))
 
     def test_mxfp8_normal_layers_quantized(self):
         out = self._run_mxfp8({})
-        for base in (
-            "transformer.blocks.2.attn.qkv",
-            "transformer.blocks.2.mlp.fc1",
-        ):
-            self.assertTrue(
-                _is_quantized(out, base), f"{base} should be quantized (mxfp8)"
-            )
+        for base in ("transformer.blocks.2.attn.qkv", "transformer.blocks.2.mlp.fc1"):
+            self.assertTrue(_is_quantized(out, base), f"{base} should be quantized (mxfp8)")
 
     # ------------------------------------------------------------------
     # 4. --anima filter (highprec) — FP8 path
     # ------------------------------------------------------------------
 
-    ANIMA_SKIPPED = [
-        "net.blocks.0.attn",
-        "net.blocks.1.adaln_modulation",
-        "final_layer.linear",
-        "llm_adapter.proj",
-        "t_embedder.mlp.0",
-        "x_embedder.proj",
-    ]
-    ANIMA_KEPT = [
-        "transformer.blocks.2.attn.qkv",
-        "net.blocks.2.attn",
-    ]
+    ANIMA_SKIPPED = ["net.blocks.0.attn", "net.blocks.1.adaln_modulation", "final_layer.linear", "llm_adapter.proj", "t_embedder.mlp.0", "x_embedder.proj"]
+    ANIMA_KEPT = ["transformer.blocks.2.attn.qkv", "net.blocks.2.attn"]
 
     def test_fp8_anima_flag_skips_highprec_layers(self):
         """--anima must prevent quantization of its highprec patterns."""
         out = self._run_fp8({"anima": True})
         for base in self.ANIMA_SKIPPED:
-            self.assertFalse(
-                _is_quantized(out, base), f"--anima: {base} should NOT be quantized"
-            )
-            self.assertFalse(
-                _has_comfy_quant(out, base),
-                f"--anima: {base} must not have comfy_quant",
-            )
+            self.assertFalse(_is_quantized(out, base), f"--anima: {base} should NOT be quantized")
+            self.assertFalse(_has_comfy_quant(out, base), f"--anima: {base} must not have comfy_quant")
             # Original weight must still be in output
-            self.assertIn(
-                f"{base}.weight", out, f"--anima: {base}.weight must be preserved"
-            )
+            self.assertIn(f"{base}.weight", out, f"--anima: {base}.weight must be preserved")
 
     def test_fp8_anima_flag_keeps_other_layers(self):
         """--anima must not affect layers outside its patterns."""
         out = self._run_fp8({"anima": True})
         for base in self.ANIMA_KEPT:
-            self.assertTrue(
-                _is_quantized(out, base), f"--anima: {base} should still be quantized"
-            )
+            self.assertTrue(_is_quantized(out, base), f"--anima: {base} should still be quantized")
 
     def test_nvfp4_anima_flag_skips_highprec_layers(self):
         out = self._run_nvfp4({"anima": True})
         for base in self.ANIMA_SKIPPED:
-            self.assertFalse(
-                _is_quantized(out, base),
-                f"nvfp4 --anima: {base} should NOT be quantized",
-            )
+            self.assertFalse(_is_quantized(out, base), f"nvfp4 --anima: {base} should NOT be quantized")
             self.assertIn(f"{base}.weight", out)
 
     def test_mxfp8_anima_flag_skips_highprec_layers(self):
         out = self._run_mxfp8({"anima": True})
         for base in self.ANIMA_SKIPPED:
-            self.assertFalse(
-                _is_quantized(out, base),
-                f"mxfp8 --anima: {base} should NOT be quantized",
-            )
+            self.assertFalse(_is_quantized(out, base), f"mxfp8 --anima: {base} should NOT be quantized")
             self.assertIn(f"{base}.weight", out)
 
     # ------------------------------------------------------------------
     # 5. --qwen35 filter (exclude) — all paths
     # ------------------------------------------------------------------
 
-    QWEN35_SKIPPED = [
-        "model.layers.0.attn",
-        "model.layers.63.attn",
-        "lm_head",
-        "embed_tokens",
-        "in_proj_a",
-        "in_proj_b",
-        "merger.dense",
-        "mtp.fc",
-        "visual.pos_embed",
-        "visual.patch_embed.proj",
-        "visual.blocks.0.attn",
-    ]
-    QWEN35_KEPT = [
-        "transformer.blocks.2.attn.qkv",
-        "net.blocks.2.attn",
-    ]
+    QWEN35_SKIPPED = ["model.layers.0.attn", "model.layers.63.attn", "lm_head", "embed_tokens", "in_proj_a", "in_proj_b", "merger.dense", "mtp.fc", "visual.pos_embed", "visual.patch_embed.proj", "visual.blocks.0.attn"]
+    QWEN35_KEPT = ["transformer.blocks.2.attn.qkv", "net.blocks.2.attn"]
 
     def test_fp8_qwen35_flag_skips_excluded_layers(self):
         out = self._run_fp8({"qwen35": True, "generic_text": True})
         for base in self.QWEN35_SKIPPED:
-            self.assertFalse(
-                _is_quantized(out, base), f"--qwen35: {base} should NOT be quantized"
-            )
+            self.assertFalse(_is_quantized(out, base), f"--qwen35: {base} should NOT be quantized")
             self.assertFalse(_has_comfy_quant(out, base))
-            self.assertIn(
-                f"{base}.weight", out, f"--qwen35: {base}.weight must be preserved"
-            )
+            self.assertIn(f"{base}.weight", out, f"--qwen35: {base}.weight must be preserved")
 
     def test_fp8_qwen35_flag_keeps_other_layers(self):
         out = self._run_fp8({"qwen35": True, "generic_text": True})
         for base in self.QWEN35_KEPT:
-            self.assertTrue(
-                _is_quantized(out, base), f"--qwen35: {base} should still be quantized"
-            )
+            self.assertTrue(_is_quantized(out, base), f"--qwen35: {base} should still be quantized")
 
     def test_nvfp4_qwen35_flag_skips_excluded_layers(self):
         out = self._run_nvfp4({"qwen35": True, "generic_text": True})
         for base in self.QWEN35_SKIPPED:
-            self.assertFalse(
-                _is_quantized(out, base),
-                f"nvfp4 --qwen35: {base} should NOT be quantized",
-            )
+            self.assertFalse(_is_quantized(out, base), f"nvfp4 --qwen35: {base} should NOT be quantized")
             self.assertIn(f"{base}.weight", out)
 
     def test_mxfp8_qwen35_flag_skips_excluded_layers(self):
         out = self._run_mxfp8({"qwen35": True, "generic_text": True})
         for base in self.QWEN35_SKIPPED:
-            self.assertFalse(
-                _is_quantized(out, base),
-                f"mxfp8 --qwen35: {base} should NOT be quantized",
-            )
+            self.assertFalse(_is_quantized(out, base), f"mxfp8 --qwen35: {base} should NOT be quantized")
             self.assertIn(f"{base}.weight", out)
 
     # ------------------------------------------------------------------
@@ -496,10 +404,7 @@ class TestFilterFlags(unittest.TestCase):
         flags = extract_filter_flags(ns)
 
         self.assertTrue(flags.get("qwen35"), "qwen35 must be True in flags")
-        self.assertTrue(
-            flags.get("generic_text"),
-            "generic_text must be auto-injected when qwen35 is set",
-        )
+        self.assertTrue(flags.get("generic_text"), "generic_text must be auto-injected when qwen35 is set")
 
     def test_extract_filter_flags_no_alias_without_qwen35(self):
         """generic_text must NOT be injected when qwen35 is not set."""
@@ -512,11 +417,7 @@ class TestFilterFlags(unittest.TestCase):
 
         flags = extract_filter_flags(ns)
 
-        self.assertNotIn(
-            "generic_text",
-            flags,
-            "generic_text must not appear when no alias is active",
-        )
+        self.assertNotIn("generic_text", flags, "generic_text must not appear when no alias is active")
 
     # ------------------------------------------------------------------
     # 7. --qwen35 input_scale behavior via generic_text injection (FP8)
@@ -532,21 +433,13 @@ class TestFilterFlags(unittest.TestCase):
         # A layer that is NOT excluded by qwen35 should have input_scale
         base = "transformer.blocks.2.attn.qkv"
         self.assertIn(f"{base}.weight_scale", out, f"{base} should be quantized")
-        self.assertIn(
-            f"{base}.input_scale",
-            out,
-            f"generic_text must produce input_scale for {base}",
-        )
+        self.assertIn(f"{base}.input_scale", out, f"generic_text must produce input_scale for {base}")
 
     def test_fp8_no_text_filter_no_input_scale_by_default(self):
         """Without any text filter, input_scale must not be added."""
         out = self._run_fp8({})
         base = "transformer.blocks.2.attn.qkv"
-        self.assertNotIn(
-            f"{base}.input_scale",
-            out,
-            "No text filter active: input_scale must not appear",
-        )
+        self.assertNotIn(f"{base}.input_scale", out, "No text filter active: input_scale must not appear")
 
     # ------------------------------------------------------------------
     # 8. t5xxl "remove" key deletes layers from output (FP8 path)
@@ -560,23 +453,15 @@ class TestFilterFlags(unittest.TestCase):
         out = self._run_fp8({"t5xxl": True})
 
         # These contain "decoder" or "lm_head" — must be absent entirely
-        removed = [
-            "decoder.block.0.attn.weight",
-            "lm_head.proj.weight",
-            "lm_head.weight",
-        ]
+        removed = ["decoder.block.0.attn.weight", "lm_head.proj.weight", "lm_head.weight"]
         for key in removed:
-            self.assertNotIn(
-                key, out, f"t5xxl remove: {key} must be deleted from output"
-            )
+            self.assertNotIn(key, out, f"t5xxl remove: {key} must be deleted from output")
 
     def test_fp8_t5xxl_remove_keeps_non_decoder_tensors(self):
         """Non-decoder layers must still be processed normally with --t5xxl."""
         out = self._run_fp8({"t5xxl": True})
         base = "transformer.blocks.2.attn.qkv"
-        self.assertTrue(
-            _is_quantized(out, base), f"t5xxl: {base} should still be quantized"
-        )
+        self.assertTrue(_is_quantized(out, base), f"t5xxl: {base} should still be quantized")
 
     # ------------------------------------------------------------------
     # 9. AVOID_KEY_NAMES: norm/bias/embed_tokens skipped by nvfp4/mxfp8 paths
@@ -588,14 +473,8 @@ class TestFilterFlags(unittest.TestCase):
         """embed_tokens and lm_head are in AVOID_KEY_NAMES; nvfp4 skips them."""
         out = self._run_nvfp4({})
         # embed_tokens is in AVOID_KEY_NAMES
-        self.assertFalse(
-            _is_quantized(out, "embed_tokens"),
-            "embed_tokens (AVOID_KEY_NAMES) must not be quantized in nvfp4",
-        )
-        self.assertFalse(
-            _is_quantized(out, "lm_head"),
-            "lm_head (AVOID_KEY_NAMES) must not be quantized in nvfp4",
-        )
+        self.assertFalse(_is_quantized(out, "embed_tokens"), "embed_tokens (AVOID_KEY_NAMES) must not be quantized in nvfp4")
+        self.assertFalse(_is_quantized(out, "lm_head"), "lm_head (AVOID_KEY_NAMES) must not be quantized in nvfp4")
 
     def test_mxfp8_avoid_key_names_skipped(self):
         out = self._run_mxfp8({})
@@ -610,20 +489,14 @@ class TestFilterFlags(unittest.TestCase):
         """A filter using "highprec" must skip quantization of its patterns."""
         # anima uses highprec
         out = self._run_fp8({"anima": True})
-        self.assertFalse(
-            _is_quantized(out, "net.blocks.0.attn"),
-            "highprec (anima): net.blocks.0.attn must not be quantized",
-        )
+        self.assertFalse(_is_quantized(out, "net.blocks.0.attn"), "highprec (anima): net.blocks.0.attn must not be quantized")
 
     def test_fp8_exclude_skips_qwen35_target(self):
         """A filter using "exclude" must skip quantization of its patterns."""
         # qwen35 uses exclude — use a separate output file to avoid Windows
         # file-lock when calling _run_fp8 twice in the same test method
         out = self._run_fp8({"qwen35": True})
-        self.assertFalse(
-            _is_quantized(out, "model.layers.0.attn"),
-            "exclude (qwen35): model.layers.0.attn must not be quantized",
-        )
+        self.assertFalse(_is_quantized(out, "model.layers.0.attn"), "exclude (qwen35): model.layers.0.attn must not be quantized")
 
     # ------------------------------------------------------------------
     # 11. --exclude-layers regex (FP8 path)
@@ -632,10 +505,7 @@ class TestFilterFlags(unittest.TestCase):
     def test_fp8_exclude_layers_regex(self):
         """--exclude-layers regex must skip matching layers."""
         out = self._run_fp8({}, exclude_layers=r"net\.blocks\.2")
-        self.assertFalse(
-            _is_quantized(out, "net.blocks.2.attn"),
-            "exclude-layers regex: net.blocks.2.attn should be skipped",
-        )
+        self.assertFalse(_is_quantized(out, "net.blocks.2.attn"), "exclude-layers regex: net.blocks.2.attn should be skipped")
         # Non-matching layer still quantized
         self.assertTrue(_is_quantized(out, "transformer.blocks.2.attn.qkv"))
 
@@ -652,12 +522,8 @@ class TestFilterFlags(unittest.TestCase):
             key = f"{base}.weight"
             if key in model:
                 orig = model[key]
-                self.assertEqual(
-                    out[key].shape, orig.shape, f"Shape mismatch for skipped {key}"
-                )
-                self.assertEqual(
-                    out[key].dtype, orig.dtype, f"Dtype mismatch for skipped {key}"
-                )
+                self.assertEqual(out[key].shape, orig.shape, f"Shape mismatch for skipped {key}")
+                self.assertEqual(out[key].dtype, orig.dtype, f"Dtype mismatch for skipped {key}")
 
     def test_fp8_3d_4d_shape_preserved(self):
         """3D and 4D tensors must be copied with original shape and dtype."""
