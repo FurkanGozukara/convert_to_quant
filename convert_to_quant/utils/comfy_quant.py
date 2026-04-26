@@ -21,9 +21,7 @@ from .logging import info, verbose, warning, error, minimal
 BLOCK_BASED_FORMATS = ("int8_blockwise", "float8_e4m3fn_blockwise")
 
 
-def create_comfy_quant_tensor(
-    format_type: str, block_size: Optional[int] = None, full_precision_matrix_mult: Optional[bool] = None
-) -> torch.Tensor:
+def create_comfy_quant_tensor(format_type: str, block_size: Optional[int] = None, full_precision_matrix_mult: Optional[bool] = None) -> torch.Tensor:
     """
     Create a .comfy_quant layer configuration tensor for ComfyUI.
 
@@ -132,14 +130,7 @@ def parse_add_keys_string(add_keys_str: str) -> Dict[str, Any]:
     return result
 
 
-def edit_comfy_quant(
-    input_file: str,
-    output_file: str,
-    remove_keys: Optional[List[str]] = None,
-    add_keys_str: Optional[str] = None,
-    layer_filter: Optional[str] = None,
-    save_quant_metadata: bool = True,
-):
+def edit_comfy_quant(input_file: str, output_file: str, remove_keys: Optional[List[str]] = None, add_keys_str: Optional[str] = None, layer_filter: Optional[str] = None, save_quant_metadata: bool = True):
     """
     Edit comfy_quant layer configurations and _quantization_metadata in a model.
 

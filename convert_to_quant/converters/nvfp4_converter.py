@@ -15,19 +15,7 @@ from typing import Tuple, Optional
 import torch
 
 from ..constants import FP4_E2M1_MAX, FP4_BLOCK_SIZE, COMPUTE_DTYPE
-from ..utils.float_utils import (
-    F8_E4M3_MAX,
-    roundup,
-    pack_uint4,
-    unpack_uint4,
-    to_blocked,
-    from_blocked,
-    _f32_to_floatx_unpacked,
-    _floatx_unpacked_to_f32,
-    _float8_round,
-    F4_E2M1_EBITS,
-    F4_E2M1_MBITS,
-)
+from ..utils.float_utils import F8_E4M3_MAX, roundup, pack_uint4, unpack_uint4, to_blocked, from_blocked, _f32_to_floatx_unpacked, _floatx_unpacked_to_f32, _float8_round, F4_E2M1_EBITS, F4_E2M1_MBITS
 
 # Check for comfy-kitchen availability
 try:
@@ -53,9 +41,7 @@ class NVFP4Converter:
         lr: Learning rate for optimization
     """
 
-    def __init__(
-        self, block_size: int = 16, pad_to_16x: bool = True, optimize: bool = True, num_iter: int = 2000, lr: float = 1e-3
-    ):
+    def __init__(self, block_size: int = 16, pad_to_16x: bool = True, optimize: bool = True, num_iter: int = 2000, lr: float = 1e-3):
         if block_size != 16:
             raise ValueError("NVFP4 requires block_size=16")
 
@@ -65,9 +51,7 @@ class NVFP4Converter:
         self.num_iter = num_iter
         self.lr = lr
 
-    def quantize(
-        self, tensor: torch.Tensor, per_tensor_scale: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def quantize(self, tensor: torch.Tensor, per_tensor_scale: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Quantize tensor to NVFP4 format.
 
@@ -97,9 +81,7 @@ class NVFP4Converter:
         # Fallback: PyTorch implementation (matches comfy-kitchen exactly)
         return self._quantize_pytorch(tensor, per_tensor_scale)
 
-    def _quantize_pytorch(
-        self, tensor: torch.Tensor, per_tensor_scale: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _quantize_pytorch(self, tensor: torch.Tensor, per_tensor_scale: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Pure PyTorch quantization fallback (matches comfy-kitchen exactly)."""
         orig_shape = tensor.shape
         device = tensor.device
@@ -151,13 +133,7 @@ class NVFP4Converter:
 
         return data_packed, blocked_scales, per_tensor_scale
 
-    def dequantize(
-        self,
-        qdata: torch.Tensor,
-        per_tensor_scale: torch.Tensor,
-        block_scales: torch.Tensor,
-        output_dtype: torch.dtype = torch.bfloat16,
-    ) -> torch.Tensor:
+    def dequantize(self, qdata: torch.Tensor, per_tensor_scale: torch.Tensor, block_scales: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
         """
         Dequantize NVFP4 tensor back to float.
 
@@ -177,13 +153,7 @@ class NVFP4Converter:
         # Fallback: PyTorch implementation
         return self._dequantize_pytorch(qdata, per_tensor_scale, block_scales, output_dtype)
 
-    def _dequantize_pytorch(
-        self,
-        qdata: torch.Tensor,
-        per_tensor_scale: torch.Tensor,
-        block_scales: torch.Tensor,
-        output_dtype: torch.dtype = torch.bfloat16,
-    ) -> torch.Tensor:
+    def _dequantize_pytorch(self, qdata: torch.Tensor, per_tensor_scale: torch.Tensor, block_scales: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
         """Pure PyTorch dequantization fallback."""
         # Unpack FP4 data
         data_unpacked = unpack_uint4(qdata)
@@ -209,9 +179,7 @@ class NVFP4Converter:
         return data_dequantized.view(orig_shape).to(output_dtype)
 
 
-def quantize_nvfp4(
-    tensor: torch.Tensor, per_tensor_scale: Optional[torch.Tensor] = None, pad_to_16x: bool = True
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def quantize_nvfp4(tensor: torch.Tensor, per_tensor_scale: Optional[torch.Tensor] = None, pad_to_16x: bool = True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Convenience function to quantize a tensor to NVFP4 format.
 
@@ -227,9 +195,7 @@ def quantize_nvfp4(
     return converter.quantize(tensor, per_tensor_scale)
 
 
-def dequantize_nvfp4(
-    qdata: torch.Tensor, block_scales: torch.Tensor, per_tensor_scale: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16
-) -> torch.Tensor:
+def dequantize_nvfp4(qdata: torch.Tensor, block_scales: torch.Tensor, per_tensor_scale: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
     """
     Convenience function to dequantize NVFP4 tensor.
 

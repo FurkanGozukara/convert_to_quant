@@ -60,10 +60,7 @@ class MXFP8Converter:
             Tuple of (quantized_data_fp8, block_scales_e8m0)
         """
         if not HAS_COMFY_KITCHEN:
-            raise RuntimeError(
-                "MXFP8 quantization requires comfy_kitchen with MXFP8 support. "
-                "Install from the fork with NVIDIA engineer additions."
-            )
+            raise RuntimeError("MXFP8 quantization requires comfy_kitchen with MXFP8 support. Install from the fork with NVIDIA engineer additions.")
 
         needs_padding = False
         orig_shape = tensor.shape
@@ -133,9 +130,7 @@ class MXFP8Converter:
 
         return qdata, blocked_scales
 
-    def dequantize(
-        self, qdata: torch.Tensor, block_scales: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16
-    ) -> torch.Tensor:
+    def dequantize(self, qdata: torch.Tensor, block_scales: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
         """
         Dequantize MXFP8 tensor back to float.
 
@@ -148,16 +143,11 @@ class MXFP8Converter:
             Dequantized tensor
         """
         if not HAS_COMFY_KITCHEN:
-            raise RuntimeError(
-                "MXFP8 dequantization requires comfy_kitchen with MXFP8 support. "
-                "Install from the fork with NVIDIA engineer additions."
-            )
+            raise RuntimeError("MXFP8 dequantization requires comfy_kitchen with MXFP8 support. Install from the fork with NVIDIA engineer additions.")
 
         return ck.dequantize_mxfp8(qdata, block_scales, output_dtype)
 
-    def _dequantize_pytorch(
-        self, qdata: torch.Tensor, block_scales: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16
-    ) -> torch.Tensor:
+    def _dequantize_pytorch(self, qdata: torch.Tensor, block_scales: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
         """Pure PyTorch dequantization fallback."""
         orig_shape = qdata.shape
         M, N = orig_shape
@@ -196,9 +186,7 @@ def quantize_mxfp8(tensor: torch.Tensor, pad_to_32x: bool = True) -> Tuple[torch
     return converter.quantize(tensor)
 
 
-def dequantize_mxfp8(
-    qdata: torch.Tensor, block_scales: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16
-) -> torch.Tensor:
+def dequantize_mxfp8(qdata: torch.Tensor, block_scales: torch.Tensor, output_dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
     """
     Convenience function to dequantize MXFP8 tensor.
 

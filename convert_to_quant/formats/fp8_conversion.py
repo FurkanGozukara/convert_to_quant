@@ -15,20 +15,7 @@ from safetensors.torch import save_file
 from typing import Dict, Any, Optional
 from tqdm import tqdm
 
-from ..constants import (
-    TARGET_FP8_DTYPE,
-    TARGET_INT8_DTYPE,
-    COMPUTE_DTYPE,
-    SCALE_DTYPE,
-    FP8_MIN,
-    FP8_MAX,
-    INT8_SYMMETRIC_MAX,
-    AVOID_KEY_NAMES,
-    T5XXL_REMOVE_KEY_NAMES,
-    MODEL_FILTERS,
-    VALID_QUANT_FORMATS,
-    NORMALIZE_SCALES_ENABLED,
-)
+from ..constants import TARGET_FP8_DTYPE, TARGET_INT8_DTYPE, COMPUTE_DTYPE, SCALE_DTYPE, FP8_MIN, FP8_MAX, INT8_SYMMETRIC_MAX, AVOID_KEY_NAMES, T5XXL_REMOVE_KEY_NAMES, MODEL_FILTERS, VALID_QUANT_FORMATS, NORMALIZE_SCALES_ENABLED
 from ..converters.learned_rounding import LearnedRoundingConverter
 from ..converters.learned_mxfp8 import LearnedMXFP8Converter
 from ..converters.learned_nvfp4 import LearnedNVFP4Converter
@@ -188,12 +175,7 @@ def convert_to_fp8_scaled(
     # Helper function to get format metadata
     def get_format_info(fmt: str) -> dict:
         """Returns dtype and format name for a quantization format."""
-        format_map = {
-            "int8": {"dtype": TARGET_INT8_DTYPE, "name": "INT8"},
-            "fp8": {"dtype": TARGET_FP8_DTYPE, "name": "FP8"},
-            "mxfp8": {"dtype": torch.uint8, "name": "MXFP8"},
-            "nvfp4": {"dtype": torch.uint8, "name": "NVFP4"},
-        }
+        format_map = {"int8": {"dtype": TARGET_INT8_DTYPE, "name": "INT8"}, "fp8": {"dtype": TARGET_FP8_DTYPE, "name": "FP8"}, "mxfp8": {"dtype": torch.uint8, "name": "MXFP8"}, "nvfp4": {"dtype": torch.uint8, "name": "NVFP4"}}
         return format_map.get(fmt, format_map["fp8"])
 
     # Create converters for each format type used
@@ -206,9 +188,7 @@ def convert_to_fp8_scaled(
             fallback_overrides["block_size"] = fallback_block_size
         if fallback_simple:
             fallback_overrides["no_learned_rounding"] = True
-        converters["fallback"] = create_converter_for_format(
-            fallback, fallback_overrides if fallback_overrides else None, is_primary=False
-        )
+        converters["fallback"] = create_converter_for_format(fallback, fallback_overrides if fallback_overrides else None, is_primary=False)
         override_note = f" (block_size={fallback_block_size})" if fallback_block_size else ""
         override_note += " (simple)" if fallback_simple else ""
         info(f"Fallback quantization enabled: {fallback.upper()}{override_note} for excluded layers")
@@ -222,9 +202,7 @@ def convert_to_fp8_scaled(
             custom_overrides["scaling_mode"] = custom_scaling_mode
         if custom_simple:
             custom_overrides["no_learned_rounding"] = True
-        converters["custom"] = create_converter_for_format(
-            custom_type, custom_overrides if custom_overrides else None, is_primary=False
-        )
+        converters["custom"] = create_converter_for_format(custom_type, custom_overrides if custom_overrides else None, is_primary=False)
         override_note = f" (block_size={custom_block_size})" if custom_block_size else ""
         override_note += f" (scaling_mode={custom_scaling_mode})" if custom_scaling_mode else ""
         override_note += " (simple)" if custom_simple else ""
@@ -259,9 +237,7 @@ def convert_to_fp8_scaled(
                 in_features = shape[1]
                 if in_features not in calibration_data_cache:
                     verbose(f"  - Found new input dimension: {in_features}.")
-                    calibration_data_cache[in_features] = torch.randn(
-                        calib_samples, in_features, dtype=COMPUTE_DTYPE, generator=seed_generator, device=seed_device
-                    )
+                    calibration_data_cache[in_features] = torch.randn(calib_samples, in_features, dtype=COMPUTE_DTYPE, generator=seed_generator, device=seed_device)
     info("Simulated calibration data generated.\n")
 
     new_tensors: Dict[str, torch.Tensor] = {}
@@ -286,12 +262,7 @@ def convert_to_fp8_scaled(
         layer_settings = None  # Per-layer settings from config
 
         # Pre-compute text encoder filter for input scale handling
-        text_encoder_filter = (
-            filter_flags.get("t5xxl")
-            or filter_flags.get("mistral")
-            or filter_flags.get("visual")
-            or filter_flags.get("generic_text")
-        )
+        text_encoder_filter = filter_flags.get("t5xxl") or filter_flags.get("mistral") or filter_flags.get("visual") or filter_flags.get("generic_text")
 
         # T5XXL decoder tensors are always removed (not quantized, not kept)
         if filter_flags.get("t5xxl") and any(n in key for n in T5XXL_REMOVE_KEY_NAMES):
@@ -434,9 +405,7 @@ def convert_to_fp8_scaled(
             dequant_s = block_scales  # For bias correction compatibility
         elif is_nvfp4:
             # NVFP4: (packed_qdata, block_scales_fp8, per_tensor_scale, dequant_w, extra_tensors)
-            q_tensor, block_scales, per_tensor_scale, dequant_w, extra_tensors = converter.convert(
-                original_tensor, key=key, depth=depth
-            )
+            q_tensor, block_scales, per_tensor_scale, dequant_w, extra_tensors = converter.convert(original_tensor, key=key, depth=depth)
             dequant_s = block_scales  # For bias correction compatibility
         else:
             # FP8/INT8: (q_tensor, scale, dequant_w, extra_tensors)
@@ -474,22 +443,14 @@ def convert_to_fp8_scaled(
                 new_tensors[f"{base_name}.weight_scale"] = block_scales.to(device="cpu")
                 comfy_quant_format = "mxfp8"
                 block_size_for_meta = 32  # MXFP8 fixed block size
-                comfy_quant_tensor = create_comfy_quant_tensor(
-                    "mxfp8",
-                    block_size=32,
-                    full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None,
-                )
+                comfy_quant_tensor = create_comfy_quant_tensor("mxfp8", block_size=32, full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None)
             elif is_nvfp4:
                 # NVFP4 format - dual scaling (block + per-tensor)
                 new_tensors[f"{base_name}.weight_scale"] = block_scales.to(device="cpu")
                 new_tensors[f"{base_name}.weight_scale_2"] = per_tensor_scale.to(device="cpu", dtype=torch.float32)
                 comfy_quant_format = "nvfp4"
                 block_size_for_meta = 16  # NVFP4 fixed block size
-                comfy_quant_tensor = create_comfy_quant_tensor(
-                    "nvfp4",
-                    block_size=16,
-                    full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None,
-                )
+                comfy_quant_tensor = create_comfy_quant_tensor("nvfp4", block_size=16, full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None)
             elif is_int8:
                 new_tensors[f"{base_name}.weight_scale"] = dequant_s.to(device="cpu", dtype=SCALE_DTYPE).detach().clone()
                 if converter.scaling_mode == "tensor":
@@ -500,11 +461,7 @@ def convert_to_fp8_scaled(
                     block_size_for_meta = layer_block_size
 
                 # Use correct INT8 format
-                comfy_quant_tensor = create_comfy_quant_tensor(
-                    comfy_quant_format,
-                    block_size=block_size_for_meta,
-                    full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None,
-                )
+                comfy_quant_tensor = create_comfy_quant_tensor(comfy_quant_format, block_size=block_size_for_meta, full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None)
                 # Add input_scale only for block-wise INT8
                 if comfy_quant_format == "int8_blockwise":
                     new_tensors[f"{base_name}.input_scale"] = torch.tensor(1.0, dtype=torch.float32, device="cpu")
@@ -536,11 +493,7 @@ def convert_to_fp8_scaled(
                 comfy_quant_format = fp8_format
                 block_size_for_meta = fp8_block_size
 
-                comfy_quant_tensor = create_comfy_quant_tensor(
-                    fp8_format,
-                    block_size=fp8_block_size,
-                    full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None,
-                )
+                comfy_quant_tensor = create_comfy_quant_tensor(fp8_format, block_size=fp8_block_size, full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None)
                 # Add input_scale for FP8: use weight_scale for t5xxl/mistral/visual, 1.0 otherwise
                 if include_input_scale or text_encoder_filter:
                     if text_encoder_filter:
@@ -596,19 +549,8 @@ def convert_to_fp8_scaled(
                         bias_correction = output_error.mean(dim=0)
                         b_new = b_orig_dev - bias_correction
                         new_tensors[bias_key] = b_new.to(device="cpu", dtype=original_bias.dtype)
-                        print(
-                            f"    - Original bias mean : {original_bias.mean().item():.6f}\n    - Corrected bias mean: {new_tensors[bias_key].mean().item():.6f}"
-                        )
-                        del (
-                            W_orig_dev,
-                            W_dequant_dev,
-                            X_calib_dev,
-                            b_orig_dev,
-                            weight_error,
-                            output_error,
-                            bias_correction,
-                            b_new,
-                        )
+                        print(f"    - Original bias mean : {original_bias.mean().item():.6f}\n    - Corrected bias mean: {new_tensors[bias_key].mean().item():.6f}")
+                        del (W_orig_dev, W_dequant_dev, X_calib_dev, b_orig_dev, weight_error, output_error, bias_correction, b_new)
                         if device == "cuda":
                             torch.cuda.empty_cache()
             else:
@@ -652,11 +594,7 @@ def convert_to_fp8_scaled(
     # Use empty((0)) when input_scale is present (t5xxl, mistral, or --input_scale flag)
     if not comfy_quant and not int8 and not custom_layers and "scaled_fp8" not in new_tensors:
         has_text_encoder_filter = filter_flags.get("t5xxl") or filter_flags.get("mistral") or filter_flags.get("visual")
-        new_tensors["scaled_fp8"] = (
-            torch.empty((0), dtype=TARGET_FP8_DTYPE)
-            if (has_text_encoder_filter or include_input_scale)
-            else torch.empty((2), dtype=TARGET_FP8_DTYPE)
-        )
+        new_tensors["scaled_fp8"] = torch.empty((0), dtype=TARGET_FP8_DTYPE) if (has_text_encoder_filter or include_input_scale) else torch.empty((2), dtype=TARGET_FP8_DTYPE)
 
     info(f"Saving {len(new_tensors)} tensors to {output_file}")
     try:

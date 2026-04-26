@@ -10,14 +10,10 @@ class TestLoraExtraction(unittest.TestCase):
         converter = LearnedRoundingConverter(extract_lora=True, lora_depth=1, lora_rank=16)
 
         # 1. Block 0 should be targeted
-        self.assertTrue(
-            converter._should_extract_lora("double_blocks.0.img_attn.qkv.weight", torch.Size([4096, 4096]), depth=0)
-        )
+        self.assertTrue(converter._should_extract_lora("double_blocks.0.img_attn.qkv.weight", torch.Size([4096, 4096]), depth=0))
 
         # 2. Block 1 Attention (Square) should NOT be targeted (Depth 1 means only Block 0)
-        self.assertFalse(
-            converter._should_extract_lora("double_blocks.1.img_attn.qkv.weight", torch.Size([4096, 4096]), depth=1)
-        )
+        self.assertFalse(converter._should_extract_lora("double_blocks.1.img_attn.qkv.weight", torch.Size([4096, 4096]), depth=1))
 
         # 3. Block 1 MLP (Elongated) should NOT be targeted
         self.assertFalse(converter._should_extract_lora("double_blocks.1.img_mlp.0.weight", torch.Size([16384, 4096]), depth=1))

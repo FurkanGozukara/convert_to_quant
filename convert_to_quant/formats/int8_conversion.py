@@ -19,13 +19,7 @@ from ..utils.comfy_quant import create_comfy_quant_tensor, fix_comfy_quant_param
 from ..utils.logging import info, verbose, debug, minimal, warning, error, log_debug
 
 
-def convert_int8_to_comfy_quant(
-    input_file: str,
-    output_file: str,
-    block_size: int = 128,
-    include_input_scale: bool = False,
-    save_quant_metadata: bool = True,
-):
+def convert_int8_to_comfy_quant(input_file: str, output_file: str, block_size: int = 128, include_input_scale: bool = False, save_quant_metadata: bool = True):
     """
     Convert legacy INT8 quantized models to comfy_quant format.
 
@@ -168,9 +162,7 @@ def convert_int8_to_comfy_quant(
                 # Check if .comfy_quant already exists in other_tensors
                 if f"{base_name}.comfy_quant" not in other_tensors:
                     detected_formats[detected_format] = detected_formats.get(detected_format, 0) + 1
-                    comfy_quant_tensor = create_comfy_quant_tensor(
-                        detected_format, block_size=detected_block_size, full_precision_matrix_mult=None
-                    )
+                    comfy_quant_tensor = create_comfy_quant_tensor(detected_format, block_size=detected_block_size, full_precision_matrix_mult=None)
                     output_tensors[f"{base_name}.comfy_quant"] = comfy_quant_tensor
 
                     # Collect metadata if enabled
@@ -221,9 +213,7 @@ def convert_int8_to_comfy_quant(
 
                 # Create .comfy_quant metadata
                 detected_formats[detected_format] = detected_formats.get(detected_format, 0) + 1
-                comfy_quant_tensor = create_comfy_quant_tensor(
-                    detected_format, block_size=detected_block_size, full_precision_matrix_mult=None
-                )
+                comfy_quant_tensor = create_comfy_quant_tensor(detected_format, block_size=detected_block_size, full_precision_matrix_mult=None)
                 output_tensors[f"{base_name}.comfy_quant"] = comfy_quant_tensor
 
                 # Collect metadata if enabled

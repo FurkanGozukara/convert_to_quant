@@ -112,17 +112,7 @@ LORA_ARGS = {"extract_lora", "lora_rank", "lora_target", "lora_depth", "lora_ar_
 class MultiHelpArgumentParser(argparse.ArgumentParser):
     """ArgumentParser with multiple help sections for experimental and filter args."""
 
-    def __init__(
-        self,
-        *args,
-        experimental_args=None,
-        filter_args=None,
-        advanced_args=None,
-        learned_rounding_args=None,
-        modes_args=None,
-        lora_args=None,
-        **kwargs,
-    ):
+    def __init__(self, *args, experimental_args=None, filter_args=None, advanced_args=None, learned_rounding_args=None, modes_args=None, lora_args=None, **kwargs):
         self._experimental_args = experimental_args or set()
         self._filter_args = filter_args or set()
         self._advanced_args = advanced_args or set()
@@ -245,16 +235,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         print("Alternative Quantization Formats:")
         print("-" * 40)
 
-        format_args = [
-            "int8",
-            "nvfp4",
-            "mxfp8",
-            "make_hybrid_mxfp8",
-            "tensor_scales_path",
-            "fallback",
-            "block_size",
-            "scaling_mode",
-        ]
+        format_args = ["int8", "nvfp4", "mxfp8", "make_hybrid_mxfp8", "tensor_scales_path", "fallback", "block_size", "scaling_mode"]
         for action in self._all_actions:
             if self._get_dest_name(action) in format_args:
                 line = self._format_action_help(action)
@@ -265,14 +246,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         print("Custom Layer Quantization:")
         print("-" * 40)
 
-        custom_args = [
-            "custom_layers",
-            "custom_type",
-            "custom_block_size",
-            "custom_scaling_mode",
-            "custom_simple",
-            "custom_heur",
-        ]
+        custom_args = ["custom_layers", "custom_type", "custom_block_size", "custom_scaling_mode", "custom_simple", "custom_heur"]
         for action in self._all_actions:
             if self._get_dest_name(action) in custom_args:
                 line = self._format_action_help(action)
@@ -313,12 +287,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         print()
 
         # Group filters by category from MODEL_FILTERS registry
-        categories = {
-            "text": "Text Encoders",
-            "diffusion": "Diffusion Models (Flux-style)",
-            "video": "Video Models",
-            "image": "Image Models",
-        }
+        categories = {"text": "Text Encoders", "diffusion": "Diffusion Models (Flux-style)", "video": "Video Models", "image": "Image Models"}
 
         for cat_key, cat_name in categories.items():
             # Get filters in this category
@@ -358,15 +327,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         print("LR Schedule (Plateau):")
         print("-" * 40)
 
-        plateau_args = [
-            "lr_patience",
-            "lr_factor",
-            "lr_min",
-            "lr_cooldown",
-            "lr_threshold",
-            "lr_shape_influence",
-            "lr_threshold_mode",
-        ]
+        plateau_args = ["lr_patience", "lr_factor", "lr_min", "lr_cooldown", "lr_threshold", "lr_shape_influence", "lr_threshold_mode"]
         for action in self._all_actions:
             if self._get_dest_name(action) in plateau_args:
                 line = self._format_action_help(action)
@@ -511,14 +472,7 @@ class MultiHelpArgumentParser(argparse.ArgumentParser):
         standard_actions = []
         for action in self._actions:
             dest = self._get_dest_name(action)
-            if (
-                dest not in self._experimental_args
-                and dest not in self._filter_args
-                and dest not in self._advanced_args
-                and dest not in self._modes_args
-                and dest not in self._learned_rounding_args
-                and dest not in self._lora_args
-            ):
+            if dest not in self._experimental_args and dest not in self._filter_args and dest not in self._advanced_args and dest not in self._modes_args and dest not in self._learned_rounding_args and dest not in self._lora_args:
                 standard_actions.append(action)
 
         # Add usage with only standard actions

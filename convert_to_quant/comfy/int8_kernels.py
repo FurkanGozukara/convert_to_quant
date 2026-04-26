@@ -227,9 +227,7 @@ def weight_quant(x: torch.Tensor, block_size: int = 128) -> Tuple[torch.Tensor, 
     assert x.is_contiguous(), "Input tensor must be contiguous"
     assert x.dim() == 2, "Input tensor must have 2 dimensions"
     M, N = x.size()
-    assert M % block_size == 0 and N % block_size == 0, (
-        f"Dimensions must be divisible by block_size={block_size}, got shape {x.shape}"
-    )
+    assert M % block_size == 0 and N % block_size == 0, f"Dimensions must be divisible by block_size={block_size}, got shape {x.shape}"
 
     y = torch.empty_like(x, dtype=torch.int8)
     s = x.new_empty(M // block_size, N // block_size, dtype=torch.float32)
@@ -307,19 +305,7 @@ int8_gemm_configs = [
 
 # @triton.autotune(configs=int8_gemm_configs, key=["N", "K"])
 @triton.jit
-def int8_gemm_kernel(
-    a_ptr,
-    b_ptr,
-    c_ptr,
-    a_s_ptr,
-    b_s_ptr,
-    M,
-    N: tl.constexpr,
-    K: tl.constexpr,
-    BLOCK_SIZE_M: tl.constexpr,
-    BLOCK_SIZE_N: tl.constexpr,
-    BLOCK_SIZE_K: tl.constexpr,
-):
+def int8_gemm_kernel(a_ptr, b_ptr, c_ptr, a_s_ptr, b_s_ptr, M, N: tl.constexpr, K: tl.constexpr, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr):
     """
     Performs a matrix multiplication operation on INT8 matrices with scaling factors.
 
@@ -381,21 +367,7 @@ def int8_gemm_kernel(
 
 # @triton.autotune(configs=int8_gemm_configs, key=["N", "K"])
 @triton.jit
-def int8_gemm_addmm_kernel(
-    a_ptr,
-    b_ptr,
-    c_ptr,
-    bias_ptr,
-    a_s_ptr,
-    b_s_ptr,
-    M,
-    N: tl.constexpr,
-    K: tl.constexpr,
-    BLOCK_SIZE_M: tl.constexpr,
-    BLOCK_SIZE_N: tl.constexpr,
-    BLOCK_SIZE_K: tl.constexpr,
-    HAS_BIAS: tl.constexpr,
-):
+def int8_gemm_addmm_kernel(a_ptr, b_ptr, c_ptr, bias_ptr, a_s_ptr, b_s_ptr, M, N: tl.constexpr, K: tl.constexpr, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr, HAS_BIAS: tl.constexpr):
     """
     Fused INT8 matrix multiplication with bias addition (addmm).
     Computes: C = A @ B + bias
@@ -508,14 +480,7 @@ def int8_gemm(a: torch.Tensor, a_s: torch.Tensor, b: torch.Tensor, b_s: torch.Te
     return c
 
 
-def int8_addmm(
-    a: torch.Tensor,
-    a_s: torch.Tensor,
-    b: torch.Tensor,
-    b_s: torch.Tensor,
-    bias: torch.Tensor = None,
-    input_block_size: int = 128,
-):
+def int8_addmm(a: torch.Tensor, a_s: torch.Tensor, b: torch.Tensor, b_s: torch.Tensor, bias: torch.Tensor = None, input_block_size: int = 128):
     """
     Fused INT8 matrix multiplication with bias addition (addmm).
     Computes: output = (a @ b) + bias
@@ -576,21 +541,7 @@ def int8_addmm(
 
     # Launch kernel
     grid = lambda META: (triton.cdiv(M, META["BLOCK_SIZE_M"]), triton.cdiv(N, META["BLOCK_SIZE_N"]))
-    int8_gemm_addmm_kernel[grid](
-        a,
-        b,
-        c,
-        bias_ptr,
-        a_s,
-        b_s,
-        M,
-        N,
-        K,
-        HAS_BIAS=has_bias,
-        BLOCK_SIZE_M=128,
-        BLOCK_SIZE_N=128,
-        BLOCK_SIZE_K=input_block_size,
-    )
+    int8_gemm_addmm_kernel[grid](a, b, c, bias_ptr, a_s, b_s, M, N, K, HAS_BIAS=has_bias, BLOCK_SIZE_M=128, BLOCK_SIZE_N=128, BLOCK_SIZE_K=input_block_size)
     return c
 
 
@@ -624,22 +575,7 @@ def int8_addmm(
 # @triton.autotune(configs=int8_gemm_configs, key=["N", "K"])
 @triton.heuristics({"NUM_BLOCKS": lambda args: args["BLOCK_SIZE_N"] // args["out_block_size"]})
 @triton.jit
-def int8_gemm_quant_kernel(
-    a_ptr,
-    b_ptr,
-    c_ptr,
-    c_s_ptr,
-    a_s_ptr,
-    b_s_ptr,
-    M,
-    N: tl.constexpr,
-    K: tl.constexpr,
-    out_block_size: tl.constexpr,
-    BLOCK_SIZE_M: tl.constexpr,
-    BLOCK_SIZE_N: tl.constexpr,
-    BLOCK_SIZE_K: tl.constexpr,
-    NUM_BLOCKS: tl.constexpr,
-):
+def int8_gemm_quant_kernel(a_ptr, b_ptr, c_ptr, c_s_ptr, a_s_ptr, b_s_ptr, M, N: tl.constexpr, K: tl.constexpr, out_block_size: tl.constexpr, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr, NUM_BLOCKS: tl.constexpr):
     """
     Fused INT8 matrix multiplication with output quantization.
     Computes: C_int8, C_scale = quantize(A @ B)
@@ -733,24 +669,7 @@ def int8_gemm_quant_kernel(
 # @triton.autotune(configs=int8_gemm_configs, key=["N", "K"])
 @triton.heuristics({"NUM_BLOCKS": lambda args: args["BLOCK_SIZE_N"] // args["out_block_size"]})
 @triton.jit
-def int8_gemm_addmm_quant_kernel(
-    a_ptr,
-    b_ptr,
-    c_ptr,
-    c_s_ptr,
-    bias_ptr,
-    a_s_ptr,
-    b_s_ptr,
-    M,
-    N: tl.constexpr,
-    K: tl.constexpr,
-    out_block_size: tl.constexpr,
-    BLOCK_SIZE_M: tl.constexpr,
-    BLOCK_SIZE_N: tl.constexpr,
-    BLOCK_SIZE_K: tl.constexpr,
-    NUM_BLOCKS: tl.constexpr,
-    HAS_BIAS: tl.constexpr,
-):
+def int8_gemm_addmm_quant_kernel(a_ptr, b_ptr, c_ptr, c_s_ptr, bias_ptr, a_s_ptr, b_s_ptr, M, N: tl.constexpr, K: tl.constexpr, out_block_size: tl.constexpr, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr, NUM_BLOCKS: tl.constexpr, HAS_BIAS: tl.constexpr):
     """
     Fused INT8 matrix multiplication with bias addition and output quantization.
     Computes: C_int8, C_scale = quantize(A @ B + bias)
@@ -849,14 +768,7 @@ def int8_gemm_addmm_quant_kernel(
     tl.store(scale_ptrs, block_scale, mask=scale_mask)
 
 
-def int8_gemm_quant(
-    a: torch.Tensor,
-    a_s: torch.Tensor,
-    b: torch.Tensor,
-    b_s: torch.Tensor,
-    out_block_size: int = 128,
-    input_block_size: int = 128,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+def int8_gemm_quant(a: torch.Tensor, a_s: torch.Tensor, b: torch.Tensor, b_s: torch.Tensor, out_block_size: int = 128, input_block_size: int = 128) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Fused INT8 GEMM with output quantization.
     Computes: C_int8, C_scale = quantize(A @ B)
@@ -898,9 +810,7 @@ def int8_gemm_quant(
     # Launch kernel
     grid = lambda META: (triton.cdiv(M, META["BLOCK_SIZE_M"]), triton.cdiv(N, META["BLOCK_SIZE_N"]))
 
-    int8_gemm_quant_kernel[grid](
-        a, b, c, c_s, a_s, b_s, M, N, K, out_block_size, BLOCK_SIZE_M=128, BLOCK_SIZE_N=128, BLOCK_SIZE_K=input_block_size
-    )
+    int8_gemm_quant_kernel[grid](a, b, c, c_s, a_s, b_s, M, N, K, out_block_size, BLOCK_SIZE_M=128, BLOCK_SIZE_N=128, BLOCK_SIZE_K=input_block_size)
 
     # Reshape scales to match batch dimensions: (M, n_blocks) -> (*batch_dims, n_blocks)
     if len(batch_shape) > 0:
@@ -909,15 +819,7 @@ def int8_gemm_quant(
     return c, c_s
 
 
-def int8_addmm_quant(
-    a: torch.Tensor,
-    a_s: torch.Tensor,
-    b: torch.Tensor,
-    b_s: torch.Tensor,
-    bias: torch.Tensor = None,
-    out_block_size: int = 128,
-    input_block_size: int = 128,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+def int8_addmm_quant(a: torch.Tensor, a_s: torch.Tensor, b: torch.Tensor, b_s: torch.Tensor, bias: torch.Tensor = None, out_block_size: int = 128, input_block_size: int = 128) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Fused INT8 addmm with output quantization.
     Computes: C_int8, C_scale = quantize(A @ B + bias)
@@ -969,23 +871,7 @@ def int8_addmm_quant(
     # Launch kernel
     grid = lambda META: (triton.cdiv(M, META["BLOCK_SIZE_M"]), triton.cdiv(N, META["BLOCK_SIZE_N"]))
 
-    int8_gemm_addmm_quant_kernel[grid](
-        a,
-        b,
-        c,
-        c_s,
-        bias_ptr,
-        a_s,
-        b_s,
-        M,
-        N,
-        K,
-        out_block_size,
-        HAS_BIAS=has_bias,
-        BLOCK_SIZE_M=128,
-        BLOCK_SIZE_N=128,
-        BLOCK_SIZE_K=input_block_size,
-    )
+    int8_gemm_addmm_quant_kernel[grid](a, b, c, c_s, bias_ptr, a_s, b_s, M, N, K, out_block_size, HAS_BIAS=has_bias, BLOCK_SIZE_M=128, BLOCK_SIZE_N=128, BLOCK_SIZE_K=input_block_size)
 
     # Reshape scales to match batch dimensions: (M, n_blocks) -> (*batch_dims, n_blocks)
     if len(batch_shape) > 0:
@@ -1018,21 +904,7 @@ int8_gelu_configs = [
     }
 )
 @triton.jit
-def int8_gelu_kernel(
-    output_ptr,
-    output_scale_ptr,
-    input_ptr,
-    input_scale_ptr,
-    M,
-    N: tl.constexpr,
-    SM,
-    SN: tl.constexpr,
-    BLOCK_SIZE: tl.constexpr,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-    BLOCK_SM: tl.constexpr,
-    BLOCK_SN: tl.constexpr,
-):
+def int8_gelu_kernel(output_ptr, output_scale_ptr, input_ptr, input_scale_ptr, M, N: tl.constexpr, SM, SN: tl.constexpr, BLOCK_SIZE: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_SM: tl.constexpr, BLOCK_SN: tl.constexpr):
     """
     Fused INT8 GELU with block-wise quantization.
 
@@ -1181,9 +1053,7 @@ def int8_gelu(x: torch.Tensor, s_x: torch.Tensor, block_size: int = 128) -> Tupl
     # Launch kernel
     grid = lambda META: (triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),)
 
-    int8_gelu_kernel[grid](
-        y, s_y, x, s_x, M, N, SM, SN, BLOCK_SIZE=block_size, BLOCK_M=128, BLOCK_N=kernel_block_n, BLOCK_SM=128
-    )
+    int8_gelu_kernel[grid](y, s_y, x, s_x, M, N, SM, SN, BLOCK_SIZE=block_size, BLOCK_M=128, BLOCK_N=kernel_block_n, BLOCK_SM=128)
 
     # Reshape back to original batch dimensions
     if len(batch_shape) > 0:

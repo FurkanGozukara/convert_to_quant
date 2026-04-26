@@ -2,19 +2,9 @@ import torch
 
 
 def calc_mantissa(abs_x, exponent, normal_mask, MANTISSA_BITS, EXPONENT_BIAS, generator=None):
-    mantissa_scaled = torch.where(
-        normal_mask,
-        (abs_x / (2.0 ** (exponent - EXPONENT_BIAS)) - 1.0) * (2**MANTISSA_BITS),
-        (abs_x / (2.0 ** (-EXPONENT_BIAS + 1 - MANTISSA_BITS))),
-    )
+    mantissa_scaled = torch.where(normal_mask, (abs_x / (2.0 ** (exponent - EXPONENT_BIAS)) - 1.0) * (2**MANTISSA_BITS), (abs_x / (2.0 ** (-EXPONENT_BIAS + 1 - MANTISSA_BITS))))
 
-    mantissa_scaled += torch.rand(
-        mantissa_scaled.size(),
-        dtype=mantissa_scaled.dtype,
-        layout=mantissa_scaled.layout,
-        device=mantissa_scaled.device,
-        generator=generator,
-    )
+    mantissa_scaled += torch.rand(mantissa_scaled.size(), dtype=mantissa_scaled.dtype, layout=mantissa_scaled.layout, device=mantissa_scaled.device, generator=generator)
     return mantissa_scaled.floor() / (2**MANTISSA_BITS)
 
 
@@ -63,9 +53,7 @@ def stochastic_rounding(value, dtype, seed=0):
         num_slices = max(1, (value.numel() / (4096 * 4096)))
         slice_size = max(1, round(value.shape[0] / num_slices))
         for i in range(0, value.shape[0], slice_size):
-            output[i : i + slice_size].copy_(
-                manual_stochastic_round_to_float8(value[i : i + slice_size], dtype, generator=generator)
-            )
+            output[i : i + slice_size].copy_(manual_stochastic_round_to_float8(value[i : i + slice_size], dtype, generator=generator))
         return output
 
     return value.to(dtype=dtype)

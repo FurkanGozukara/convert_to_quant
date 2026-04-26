@@ -169,18 +169,7 @@ class UnifiedSafetensorsLoader:
     @staticmethod
     def _get_torch_dtype(dtype_str: str) -> torch.dtype:
         """Map safetensors dtype string to torch dtype."""
-        dtype_map = {
-            "F64": torch.float64,
-            "F32": torch.float32,
-            "F16": torch.float16,
-            "BF16": torch.bfloat16,
-            "I64": torch.int64,
-            "I32": torch.int32,
-            "I16": torch.int16,
-            "I8": torch.int8,
-            "U8": torch.uint8,
-            "BOOL": torch.bool,
-        }
+        dtype_map = {"F64": torch.float64, "F32": torch.float32, "F16": torch.float16, "BF16": torch.bfloat16, "I64": torch.int64, "I32": torch.int32, "I16": torch.int16, "I8": torch.int8, "U8": torch.uint8, "BOOL": torch.bool}
         if hasattr(torch, "float8_e5m2"):
             dtype_map["F8_E5M2"] = torch.float8_e5m2
         if hasattr(torch, "float8_e4m3fn"):

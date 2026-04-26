@@ -155,9 +155,7 @@ class QuantizedTensor(torch.Tensor):
             layout_type: Layout class (subclass of QuantizedLayout)
             layout_params: Dict with layout-specific parameters
         """
-        return torch.Tensor._make_wrapper_subclass(
-            cls, qdata.shape, device=qdata.device, dtype=qdata.dtype, requires_grad=False
-        )
+        return torch.Tensor._make_wrapper_subclass(cls, qdata.shape, device=qdata.device, dtype=qdata.dtype, requires_grad=False)
 
     def __init__(self, qdata, layout_type, layout_params):
         self._qdata = qdata
@@ -331,9 +329,7 @@ def generic_to_copy(func, args, kwargs):
     """Device/dtype transfer operation - handles .to(device) calls."""
     qt = args[0]
     if isinstance(qt, QuantizedTensor):
-        return _handle_device_transfer(
-            qt, target_device=kwargs.get("device", None), target_dtype=kwargs.get("dtype", None), op_name="_to_copy"
-        )
+        return _handle_device_transfer(qt, target_device=kwargs.get("device", None), target_dtype=kwargs.get("dtype", None), op_name="_to_copy")
     return func(*args, **kwargs)
 
 
@@ -342,13 +338,7 @@ def generic_to_dtype_layout(func, args, kwargs):
     """Handle .to(device) calls using the dtype_layout variant."""
     qt = args[0]
     if isinstance(qt, QuantizedTensor):
-        return _handle_device_transfer(
-            qt,
-            target_device=kwargs.get("device", None),
-            target_dtype=kwargs.get("dtype", None),
-            target_layout=kwargs.get("layout", None),
-            op_name="to",
-        )
+        return _handle_device_transfer(qt, target_device=kwargs.get("device", None), target_dtype=kwargs.get("dtype", None), target_layout=kwargs.get("layout", None), op_name="to")
     return func(*args, **kwargs)
 
 
@@ -584,9 +574,7 @@ class BlockWiseFP8Layout(QuantizedLayout):
         M, N = tensor.shape
 
         if M % block_size != 0 or N % block_size != 0:
-            raise ValueError(
-                f"BlockWiseFP8Layout requires dimensions divisible by block_size={block_size}. Got shape ({M}, {N})"
-            )
+            raise ValueError(f"BlockWiseFP8Layout requires dimensions divisible by block_size={block_size}. Got shape ({M}, {N})")
 
         fp8_max = torch.finfo(dtype).max
 
@@ -699,9 +687,7 @@ class BlockWiseINT8Layout(QuantizedLayout):
             # Expected shape: (M, N)
             assert tensor.dim() == 2, f"Weight tensor must be 2D, got shape {tensor.shape}"
             M, N = tensor.shape
-            assert M % block_size == 0 and N % block_size == 0, (
-                f"Dimensions must be divisible by block_size={block_size}, got shape {tensor.shape}"
-            )
+            assert M % block_size == 0 and N % block_size == 0, f"Dimensions must be divisible by block_size={block_size}, got shape {tensor.shape}"
 
             # Use Triton kernel if available AND tensor is on CUDA
             if _HAS_TRITON_INT8 and scale is None and tensor.is_cuda:
@@ -733,12 +719,7 @@ class BlockWiseINT8Layout(QuantizedLayout):
             else:
                 qdata, scale = cls._activation_quantize_pytorch(tensor, block_size, scale)
 
-        layout_params = {
-            "scale": scale.to(torch.float32),
-            "block_size": block_size,
-            "is_weight": is_weight,
-            "orig_dtype": orig_dtype,
-        }
+        layout_params = {"scale": scale.to(torch.float32), "block_size": block_size, "is_weight": is_weight, "orig_dtype": orig_dtype}
 
         return qdata, layout_params
 
@@ -818,12 +799,7 @@ class BlockWiseINT8Layout(QuantizedLayout):
             # Weight dequantization
             if _HAS_TRITON_INT8 and qdata.dim() == 2 and qdata.is_cuda:
                 try:
-                    dequant = triton_weight_dequant(
-                        qdata,
-                        scale,
-                        block_size=block_size,
-                        output_dtype=output_dtype if output_dtype is not None else orig_dtype,
-                    )
+                    dequant = triton_weight_dequant(qdata, scale, block_size=block_size, output_dtype=output_dtype if output_dtype is not None else orig_dtype)
                     return dequant
                 except Exception as e:
                     logging.warning(f"Triton weight_dequant failed: {e}, falling back to PyTorch")
@@ -838,9 +814,7 @@ class BlockWiseINT8Layout(QuantizedLayout):
                 if scale.numel() == expected_numel:
                     scale = scale.reshape(expected_scale_shape)
                 else:
-                    raise RuntimeError(
-                        f"Weight dequant scale shape mismatch: scale.shape={scale.shape}, expected {expected_scale_shape}"
-                    )
+                    raise RuntimeError(f"Weight dequant scale shape mismatch: scale.shape={scale.shape}, expected {expected_scale_shape}")
             qdata_blocked = qdata.reshape(M // block_size, block_size, N // block_size, block_size)
             qdata_blocked = qdata_blocked.permute(0, 2, 1, 3)
             scale_broadcast = scale.unsqueeze(-1).unsqueeze(-1)
@@ -850,12 +824,7 @@ class BlockWiseINT8Layout(QuantizedLayout):
             # Activation dequantization
             if _HAS_TRITON_INT8 and qdata.is_cuda:
                 try:
-                    dequant = triton_act_dequant(
-                        qdata,
-                        scale,
-                        block_size=block_size,
-                        output_dtype=output_dtype if output_dtype is not None else orig_dtype,
-                    )
+                    dequant = triton_act_dequant(qdata, scale, block_size=block_size, output_dtype=output_dtype if output_dtype is not None else orig_dtype)
                     return dequant
                 except Exception as e:
                     logging.warning(f"Triton act_dequant failed: {e}, falling back to PyTorch")
@@ -873,9 +842,7 @@ class BlockWiseINT8Layout(QuantizedLayout):
                 if scale.numel() == expected_numel:
                     scale = scale.reshape(expected_scale_shape)
                 else:
-                    raise RuntimeError(
-                        f"Activation dequant scale shape mismatch: scale.shape={scale.shape}, expected {expected_scale_shape}"
-                    )
+                    raise RuntimeError(f"Activation dequant scale shape mismatch: scale.shape={scale.shape}, expected {expected_scale_shape}")
             qdata_blocked = qdata.reshape(*batch_shape, K // block_size, block_size)
             scale_broadcast = scale.unsqueeze(-1)
             dequant = qdata_blocked.to(orig_dtype) * scale_broadcast
@@ -891,12 +858,7 @@ class BlockWiseINT8Layout(QuantizedLayout):
         Returns:
             Tuple of (qdata, scale, block_size, is_weight)
         """
-        return (
-            qtensor._qdata,
-            qtensor._layout_params["scale"],
-            qtensor._layout_params["block_size"],
-            qtensor._layout_params["is_weight"],
-        )
+        return (qtensor._qdata, qtensor._layout_params["scale"], qtensor._layout_params["block_size"], qtensor._layout_params["is_weight"])
 
 
 # ==============================================================================
@@ -972,16 +934,8 @@ class TensorWiseINT8Layout(QuantizedLayout):
 # Note: group_size here is a fallback if per-tensor .comfy_quant metadata doesn't specify it.
 # Prefer always storing group_size in per-tensor metadata during conversion.
 QUANT_ALGOS = {
-    "float8_e4m3fn": {
-        "storage_t": torch.float8_e4m3fn,
-        "parameters": {"weight_scale", "input_scale"},
-        "comfy_tensor_layout": "TensorCoreFP8Layout",
-    },
-    "float8_e4m3fn_rowwise": {
-        "storage_t": torch.float8_e4m3fn,
-        "parameters": {"weight_scale", "input_scale"},
-        "comfy_tensor_layout": "RowWiseFP8Layout",
-    },
+    "float8_e4m3fn": {"storage_t": torch.float8_e4m3fn, "parameters": {"weight_scale", "input_scale"}, "comfy_tensor_layout": "TensorCoreFP8Layout"},
+    "float8_e4m3fn_rowwise": {"storage_t": torch.float8_e4m3fn, "parameters": {"weight_scale", "input_scale"}, "comfy_tensor_layout": "RowWiseFP8Layout"},
     "float8_e4m3fn_blockwise": {
         "storage_t": torch.float8_e4m3fn,
         "parameters": {"weight_scale", "input_scale"},
@@ -995,21 +949,11 @@ QUANT_ALGOS = {
         "group_size": 128,  # Fallback if per-tensor metadata missing
         "asymmetric_layout": True,
     },
-    "int8_tensorwise": {
-        "storage_t": torch.int8,
-        "parameters": {"weight_scale", "input_scale"},
-        "comfy_tensor_layout": "TensorWiseINT8Layout",
-    },
+    "int8_tensorwise": {"storage_t": torch.int8, "parameters": {"weight_scale", "input_scale"}, "comfy_tensor_layout": "TensorWiseINT8Layout"},
 }
 
 
-LAYOUTS = {
-    "TensorCoreFP8Layout": TensorCoreFP8Layout,
-    "RowWiseFP8Layout": RowWiseFP8Layout,
-    "BlockWiseFP8Layout": BlockWiseFP8Layout,
-    "BlockWiseINT8Layout": BlockWiseINT8Layout,
-    "TensorWiseINT8Layout": TensorWiseINT8Layout,
-}
+LAYOUTS = {"TensorCoreFP8Layout": TensorCoreFP8Layout, "RowWiseFP8Layout": RowWiseFP8Layout, "BlockWiseFP8Layout": BlockWiseFP8Layout, "BlockWiseINT8Layout": BlockWiseINT8Layout, "TensorWiseINT8Layout": TensorWiseINT8Layout}
 
 
 @register_layout_op(torch.ops.aten.linear.default, "TensorCoreFP8Layout")
@@ -1038,14 +982,7 @@ def fp8_linear(func, args, kwargs):
             return None
 
         try:
-            output = torch._scaled_mm(
-                plain_input.reshape(-1, input_shape[2]).contiguous(),
-                weight_t,
-                bias=bias,
-                scale_a=scale_a,
-                scale_b=scale_b,
-                out_dtype=out_dtype,
-            )
+            output = torch._scaled_mm(plain_input.reshape(-1, input_shape[2]).contiguous(), weight_t, bias=bias, scale_a=scale_a, scale_b=scale_b, out_dtype=out_dtype)
 
             if isinstance(output, tuple):  # TODO: remove when we drop support for torch 2.4
                 output = output[0]
@@ -1079,9 +1016,7 @@ def fp8_mm_(input_tensor, weight, bias=None, out_dtype=None):
     plain_input, scale_a = TensorCoreFP8Layout.get_plain_tensors(input_tensor)
     plain_weight, scale_b = TensorCoreFP8Layout.get_plain_tensors(weight)
 
-    output = torch._scaled_mm(
-        plain_input.contiguous(), plain_weight, bias=bias, scale_a=scale_a, scale_b=scale_b, out_dtype=out_dtype
-    )
+    output = torch._scaled_mm(plain_input.contiguous(), plain_weight, bias=bias, scale_a=scale_a, scale_b=scale_b, out_dtype=out_dtype)
 
     if isinstance(output, tuple):  # TODO: remove when we drop support for torch 2.4
         output = output[0]
@@ -1311,10 +1246,7 @@ def _int8_gemm_pytorch_fallback(a_int8, a_scale, b_int8, b_scale, block_size, bi
         if a_scale.numel() == expected_numel:
             a_scale = a_scale.reshape(expected_scale_shape)
         else:
-            raise RuntimeError(
-                f"Scale shape mismatch: a_scale.shape={a_scale.shape}, expected {expected_scale_shape}. "
-                + f"a_int8.shape={a_int8.shape}, K={K}, block_size={block_size}"
-            )
+            raise RuntimeError(f"Scale shape mismatch: a_scale.shape={a_scale.shape}, expected {expected_scale_shape}. " + f"a_int8.shape={a_int8.shape}, K={K}, block_size={block_size}")
 
     a_blocked = a_int8.reshape(*batch_shape, K // block_size, block_size)
     a_scale_broadcast = a_scale.unsqueeze(-1)
@@ -1330,10 +1262,7 @@ def _int8_gemm_pytorch_fallback(a_int8, a_scale, b_int8, b_scale, block_size, bi
         if b_scale.numel() == expected_weight_numel:
             b_scale = b_scale.reshape(expected_weight_scale_shape)
         else:
-            raise RuntimeError(
-                f"Weight scale shape mismatch: b_scale.shape={b_scale.shape}, expected {expected_weight_scale_shape}. "
-                + f"b_int8.shape={b_int8.shape}, N={N}, K={K}, block_size={block_size}"
-            )
+            raise RuntimeError(f"Weight scale shape mismatch: b_scale.shape={b_scale.shape}, expected {expected_weight_scale_shape}. " + f"b_int8.shape={b_int8.shape}, N={N}, K={K}, block_size={block_size}")
 
     # Dequantize weight: (N, K) -> blocks -> dequantize -> (N, K)
     b_blocked = b_int8.reshape(N // block_size, block_size, K // block_size, block_size)
@@ -1390,14 +1319,10 @@ def _int8_gemm_triton_or_fallback(a_int8, a_scale, b_int8, b_scale, block_size, 
                 # Use fused matmul + quantization kernels
                 if bias is not None:
                     # Fused addmm + quantization
-                    output_2d, output_scale_2d = triton_int8_addmm_quant(
-                        a_2d, a_scale_2d, b_int8_c, b_scale_c, bias, out_block_size=block_size
-                    )
+                    output_2d, output_scale_2d = triton_int8_addmm_quant(a_2d, a_scale_2d, b_int8_c, b_scale_c, bias, out_block_size=block_size)
                 else:
                     # Fused gemm + quantization
-                    output_2d, output_scale_2d = triton_int8_gemm_quant(
-                        a_2d, a_scale_2d, b_int8_c, b_scale_c, out_block_size=block_size
-                    )
+                    output_2d, output_scale_2d = triton_int8_gemm_quant(a_2d, a_scale_2d, b_int8_c, b_scale_c, out_block_size=block_size)
 
                 # Reshape back to original batch shape
                 output = output_2d.reshape(*batch_shape, N)
@@ -1713,10 +1638,7 @@ def int8_transpose_int(func, args, kwargs):
                 # For higher dimensional weight tensors or partial transposes,
                 # we may need more complex scale handling
                 # For now, log a warning as this is an uncommon case
-                logging.warning(
-                    f"Transpose on weight tensor with dims ({dim0}, {dim1}) and shape {plain_input.shape}. "
-                    f"Scale tensor may need adjustment for correct behavior."
-                )
+                logging.warning(f"Transpose on weight tensor with dims ({dim0}, {dim1}) and shape {plain_input.shape}. Scale tensor may need adjustment for correct behavior.")
         else:
             # For activation tensors, block-wise quantization is along last dimension
             # If we're swapping the last dimension, this changes the quantization structure
@@ -1765,10 +1687,7 @@ def int8_transpose_int(func, args, kwargs):
                         # Transpose the same dimensions in scale
                         new_layout_params["scale"] = scale.transpose(dim0, dim1).contiguous()
                 else:
-                    logging.warning(
-                        f"Transpose involves last dimension but scale tensor has shape {scale.shape}. "
-                        f"Scale tensor may need adjustment."
-                    )
+                    logging.warning(f"Transpose involves last dimension but scale tensor has shape {scale.shape}. Scale tensor may need adjustment.")
             else:
                 # Transposing batch dimensions that don't affect the quantized dimension
                 # Transpose the same dimensions in scale tensor
@@ -1948,9 +1867,7 @@ def tensorwise_int8_linear(func, args, kwargs):
         try:
             # torch._scaled_mm expects float inputs but performs scaled matmul
             # See reference int8_gemm_scaled_mm.py
-            output = torch._scaled_mm(
-                input_2d.float().contiguous(), weight_t.float().contiguous(), scale=float(scale_a * scale_b), bias=bias
-            )
+            output = torch._scaled_mm(input_2d.float().contiguous(), weight_t.float().contiguous(), scale=float(scale_a * scale_b), bias=bias)
 
             if isinstance(output, tuple):
                 output = output[0]
@@ -1984,9 +1901,7 @@ def tensorwise_int8_mm(func, args, kwargs):
         plain_weight, scale_b = TensorWiseINT8Layout.get_plain_tensors(weight)
 
         try:
-            output = torch._scaled_mm(
-                plain_input.float().contiguous(), plain_weight.float().contiguous(), scale=float(scale_a * scale_b)
-            )
+            output = torch._scaled_mm(plain_input.float().contiguous(), plain_weight.float().contiguous(), scale=float(scale_a * scale_b))
             if isinstance(output, tuple):
                 output = output[0]
             return output
@@ -2014,9 +1929,7 @@ def tensorwise_int8_addmm(func, args, kwargs):
         plain_weight, scale_b = TensorWiseINT8Layout.get_plain_tensors(weight)
 
         try:
-            output = torch._scaled_mm(
-                plain_input.float().contiguous(), plain_weight.float().contiguous(), scale=float(scale_a * scale_b), bias=bias
-            )
+            output = torch._scaled_mm(plain_input.float().contiguous(), plain_weight.float().contiguous(), scale=float(scale_a * scale_b), bias=bias)
             if isinstance(output, tuple):
                 output = output[0]
             return output

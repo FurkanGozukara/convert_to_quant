@@ -36,9 +36,7 @@ from convert_to_quant.cli.main import extract_filter_flags
 
 def _has_quant_artifacts(tensors: dict, base: str) -> bool:
     """Return True if any quantization artifact exists for a given base name."""
-    return any(
-        k.startswith(base + ".") and k != base + ".weight" for k in tensors if k not in (base + ".weight", base + ".bias")
-    )
+    return any(k.startswith(base + ".") and k != base + ".weight" for k in tensors if k not in (base + ".weight", base + ".bias"))
 
 
 def _is_quantized(tensors: dict, base: str) -> bool:
@@ -326,14 +324,7 @@ class TestFilterFlags(unittest.TestCase):
     # 4. --anima filter (highprec) — FP8 path
     # ------------------------------------------------------------------
 
-    ANIMA_SKIPPED = [
-        "net.blocks.0.attn",
-        "net.blocks.1.adaln_modulation",
-        "final_layer.linear",
-        "llm_adapter.proj",
-        "t_embedder.mlp.0",
-        "x_embedder.proj",
-    ]
+    ANIMA_SKIPPED = ["net.blocks.0.attn", "net.blocks.1.adaln_modulation", "final_layer.linear", "llm_adapter.proj", "t_embedder.mlp.0", "x_embedder.proj"]
     ANIMA_KEPT = ["transformer.blocks.2.attn.qkv", "net.blocks.2.attn"]
 
     def test_fp8_anima_flag_skips_highprec_layers(self):
@@ -367,19 +358,7 @@ class TestFilterFlags(unittest.TestCase):
     # 5. --qwen35 filter (exclude) — all paths
     # ------------------------------------------------------------------
 
-    QWEN35_SKIPPED = [
-        "model.layers.0.attn",
-        "model.layers.63.attn",
-        "lm_head",
-        "embed_tokens",
-        "in_proj_a",
-        "in_proj_b",
-        "merger.dense",
-        "mtp.fc",
-        "visual.pos_embed",
-        "visual.patch_embed.proj",
-        "visual.blocks.0.attn",
-    ]
+    QWEN35_SKIPPED = ["model.layers.0.attn", "model.layers.63.attn", "lm_head", "embed_tokens", "in_proj_a", "in_proj_b", "merger.dense", "mtp.fc", "visual.pos_embed", "visual.patch_embed.proj", "visual.blocks.0.attn"]
     QWEN35_KEPT = ["transformer.blocks.2.attn.qkv", "net.blocks.2.attn"]
 
     def test_fp8_qwen35_flag_skips_excluded_layers(self):
@@ -517,9 +496,7 @@ class TestFilterFlags(unittest.TestCase):
         # qwen35 uses exclude — use a separate output file to avoid Windows
         # file-lock when calling _run_fp8 twice in the same test method
         out = self._run_fp8({"qwen35": True})
-        self.assertFalse(
-            _is_quantized(out, "model.layers.0.attn"), "exclude (qwen35): model.layers.0.attn must not be quantized"
-        )
+        self.assertFalse(_is_quantized(out, "model.layers.0.attn"), "exclude (qwen35): model.layers.0.attn must not be quantized")
 
     # ------------------------------------------------------------------
     # 11. --exclude-layers regex (FP8 path)

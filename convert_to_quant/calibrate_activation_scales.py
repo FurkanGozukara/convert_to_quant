@@ -71,9 +71,7 @@ def infer_block_size(weight_shape: tuple, scale_shape: tuple) -> int:
     return block_size_m
 
 
-def dequantize_fp8_weight(
-    weight: torch.Tensor, scale: torch.Tensor, block_size: int = None, target_dtype: torch.dtype = torch.float32
-) -> torch.Tensor:
+def dequantize_fp8_weight(weight: torch.Tensor, scale: torch.Tensor, block_size: int = None, target_dtype: torch.dtype = torch.float32) -> torch.Tensor:
     """
     Dequantize FP8 weight tensor using scale.
 
@@ -129,16 +127,7 @@ def dequantize_fp8_weight(
     return weight.to(target_dtype) * scale.to(dtype=target_dtype)
 
 
-def compute_activation_scale(
-    weight: torch.Tensor,
-    in_features: int,
-    calib_samples: int = 64,
-    seed: int = 42,
-    percentile: float = 99.9,
-    lora_A: torch.Tensor = None,
-    weight_scale: torch.Tensor = None,
-    device: torch.device = None,
-) -> torch.Tensor:
+def compute_activation_scale(weight: torch.Tensor, in_features: int, calib_samples: int = 64, seed: int = 42, percentile: float = 99.9, lora_A: torch.Tensor = None, weight_scale: torch.Tensor = None, device: torch.device = None) -> torch.Tensor:
     """
     Compute input_scale for a layer using calibration data.
 
@@ -332,28 +321,10 @@ def load_lora_tensors(lora_path: str) -> dict:
     lora_by_layer = {}
 
     # Suffixes for "down" tensor (input projection, A matrix)
-    down_suffixes = [
-        ".lora_A.weight",
-        ".lora_down.weight",
-        ".lora.down.weight",
-        ".lora_A",
-        ".lora_down",
-        ".lora.down",
-        ".down.weight",
-        ".down",
-    ]
+    down_suffixes = [".lora_A.weight", ".lora_down.weight", ".lora.down.weight", ".lora_A", ".lora_down", ".lora.down", ".down.weight", ".down"]
 
     # Suffixes for "up" tensor (output projection, B matrix)
-    up_suffixes = [
-        ".lora_B.weight",
-        ".lora_up.weight",
-        ".lora.up.weight",
-        ".lora_B",
-        ".lora_up",
-        ".lora.up",
-        ".up.weight",
-        ".up",
-    ]
+    up_suffixes = [".lora_B.weight", ".lora_up.weight", ".lora.up.weight", ".lora_B", ".lora_up", ".lora.up", ".up.weight", ".up"]
 
     # Alpha suffixes
     alpha_suffixes = [".alpha", ".lora_alpha"]
@@ -389,15 +360,7 @@ def load_lora_tensors(lora_path: str) -> dict:
     return lora_by_layer
 
 
-def calibrate_model(
-    tensors: dict,
-    calib_samples: int = 64,
-    seed: int = 42,
-    percentile: float = 99.9,
-    verbose: bool = True,
-    lora_tensors: dict = None,
-    device: str = None,
-) -> dict:
+def calibrate_model(tensors: dict, calib_samples: int = 64, seed: int = 42, percentile: float = 99.9, verbose: bool = True, lora_tensors: dict = None, device: str = None) -> dict:
     """
     Compute calibrated input_scale for all FP8 layers in a model.
 
@@ -492,9 +455,7 @@ def calibrate_model(
             weight_scale = tensors[f"{base_name}.scale_weight"]
 
         # Compute calibrated input_scale
-        input_scale = compute_activation_scale(
-            weight, in_features, calib_samples, seed, percentile, lora_A, weight_scale, device
-        )
+        input_scale = compute_activation_scale(weight, in_features, calib_samples, seed, percentile, lora_A, weight_scale, device)
 
         scales[base_name] = input_scale
 
@@ -590,13 +551,9 @@ Examples:
     parser.add_argument("-o", "--output", help="Output safetensors file with calibrated input_scale values")
     parser.add_argument("--json", dest="json_output", help="Export computed scales to JSON file")
     parser.add_argument("--lora", dest="lora_path", help="LoRA file for informed calibration (uses LoRA_A as input directions)")
-    parser.add_argument(
-        "--samples", type=int, default=64, help="Number of calibration samples per layer for random mode (default: 64)"
-    )
+    parser.add_argument("--samples", type=int, default=64, help="Number of calibration samples per layer for random mode (default: 64)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
-    parser.add_argument(
-        "--percentile", type=float, default=99.9, help="Percentile for absmax computation (default: 99.9, use 100 for true max)"
-    )
+    parser.add_argument("--percentile", type=float, default=99.9, help="Percentile for absmax computation (default: 99.9, use 100 for true max)")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output")
 
     args = parser.parse_args()
@@ -642,14 +599,7 @@ Examples:
         mode = "LoRA-informed" if lora_tensors else "random"
         print(f"\nCalibrating ({mode} mode, {args.samples} samples, seed={args.seed})...")
 
-    scales = calibrate_model(
-        tensors,
-        calib_samples=args.samples,
-        seed=args.seed,
-        percentile=args.percentile,
-        verbose=verbose,
-        lora_tensors=lora_tensors,
-    )
+    scales = calibrate_model(tensors, calib_samples=args.samples, seed=args.seed, percentile=args.percentile, verbose=verbose, lora_tensors=lora_tensors)
 
     if verbose:
         print(f"\nCalibrated {len(scales)} layers")

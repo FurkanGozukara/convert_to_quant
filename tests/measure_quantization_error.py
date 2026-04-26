@@ -195,14 +195,7 @@ class QuantizationErrorMeasurer:
             verbose(f"Failed to parse .comfy_quant for {layer_name}: {e}")
             return None
 
-    def compute_error_metrics(
-        self,
-        original: torch.Tensor,
-        quantized: torch.Tensor,
-        layer_name: str,
-        scale: Optional[torch.Tensor] = None,
-        comfy_config: Optional[Dict] = None,
-    ) -> Optional[LayerErrorMetrics]:
+    def compute_error_metrics(self, original: torch.Tensor, quantized: torch.Tensor, layer_name: str, scale: Optional[torch.Tensor] = None, comfy_config: Optional[Dict] = None) -> Optional[LayerErrorMetrics]:
         """Compute detailed error metrics for a single layer."""
 
         # Check for empty tensors
@@ -260,9 +253,7 @@ class QuantizationErrorMeasurer:
             quant_std = quantized_flat.std()
 
             if orig_std > 1e-10 and quant_std > 1e-10:
-                correlation = (
-                    ((original_flat - orig_mean) * (quantized_flat - quant_mean)).mean() / (orig_std * quant_std)
-                ).item()
+                correlation = (((original_flat - orig_mean) * (quantized_flat - quant_mean)).mean() / (orig_std * quant_std)).item()
                 # Clamp to [-1, 1] to handle numerical errors
                 correlation = max(-1.0, min(1.0, correlation))
             else:
@@ -335,14 +326,7 @@ class QuantizationErrorMeasurer:
             comfy_format=comfy_format,
         )
 
-    def compare_models(
-        self,
-        original_tensors: Dict[str, torch.Tensor],
-        quantized_tensors: Dict[str, torch.Tensor],
-        original_metadata: Optional[Dict] = None,
-        quantized_metadata: Optional[Dict] = None,
-        layer_filter: Optional[List[str]] = None,
-    ) -> bool:
+    def compare_models(self, original_tensors: Dict[str, torch.Tensor], quantized_tensors: Dict[str, torch.Tensor], original_metadata: Optional[Dict] = None, quantized_metadata: Optional[Dict] = None, layer_filter: Optional[List[str]] = None) -> bool:
         """
         Compare original and quantized models.
 
@@ -405,9 +389,7 @@ class QuantizationErrorMeasurer:
             comfy_config = self.get_comfy_quant_config(quantized_tensors, layer_name)
 
             # Compute metrics
-            metrics = self.compute_error_metrics(
-                original_tensor, quantized_tensor, layer_name, scale=scale, comfy_config=comfy_config
-            )
+            metrics = self.compute_error_metrics(original_tensor, quantized_tensor, layer_name, scale=scale, comfy_config=comfy_config)
 
             if metrics:
                 self.layer_metrics.append(metrics)
@@ -467,13 +449,7 @@ class QuantizationErrorMeasurer:
             median_pearson_correlation=sorted_pearson[len(sorted_pearson) // 2],
             mean_cosine_similarity=sum(cosine_list) / len(cosine_list),
             median_cosine_similarity=sorted_cosine[len(sorted_cosine) // 2],
-            relative_error_percentiles={
-                "p50": sorted_rel_err[int(0.50 * len(sorted_rel_err))],
-                "p75": sorted_rel_err[int(0.75 * len(sorted_rel_err))],
-                "p90": sorted_rel_err[int(0.90 * len(sorted_rel_err))],
-                "p95": sorted_rel_err[int(0.95 * len(sorted_rel_err))],
-                "p99": sorted_rel_err[int(0.99 * len(sorted_rel_err))],
-            },
+            relative_error_percentiles={"p50": sorted_rel_err[int(0.50 * len(sorted_rel_err))], "p75": sorted_rel_err[int(0.75 * len(sorted_rel_err))], "p90": sorted_rel_err[int(0.90 * len(sorted_rel_err))], "p95": sorted_rel_err[int(0.95 * len(sorted_rel_err))], "p99": sorted_rel_err[int(0.99 * len(sorted_rel_err))]},
         )
 
     def print_report(self, aggregate: AggregateErrorMetrics, top_n: int = 10):
@@ -582,19 +558,11 @@ Examples:
 
     parser.add_argument("--original", type=str, required=True, help="Path to original (BF16/FP32) model")
     parser.add_argument("--quantized", type=str, required=True, help="Path to quantized (FP8) model")
-    parser.add_argument(
-        "--layers-to-compare", type=str, default=None, help="Comma-separated layer names to compare (e.g., 'attention,mlp')"
-    )
+    parser.add_argument("--layers-to-compare", type=str, default=None, help="Comma-separated layer names to compare (e.g., 'attention,mlp')")
     parser.add_argument("--output-report", type=str, default=None, help="Path to save detailed JSON report")
     parser.add_argument("--top-layers", type=int, default=10, help="Number of worst layers to show in report (default: 10)")
-    parser.add_argument(
-        "--device", type=str, default=None, choices=["cuda", "cpu"], help="Device to use for computation (default: auto-detect)"
-    )
-    parser.add_argument(
-        "--low-memory",
-        action="store_true",
-        help="Enable memory-efficient mode (stream tensors on-demand instead of preloading)",
-    )
+    parser.add_argument("--device", type=str, default=None, choices=["cuda", "cpu"], help="Device to use for computation (default: auto-detect)")
+    parser.add_argument("--low-memory", action="store_true", help="Enable memory-efficient mode (stream tensors on-demand instead of preloading)")
 
     args = parser.parse_args()
 
@@ -630,9 +598,7 @@ Examples:
         return 1
 
     # Compare models
-    if not measurer.compare_models(
-        original_tensors, quantized_tensors, original_metadata, quantized_metadata, layer_filter=layer_filter
-    ):
+    if not measurer.compare_models(original_tensors, quantized_tensors, original_metadata, quantized_metadata, layer_filter=layer_filter):
         return 1
 
     # Compute aggregate metrics

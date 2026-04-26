@@ -68,33 +68,10 @@ def print_examples():
 
     examples = [
         ("Test with Synthetic Models", "python tests/example_quantization_error.py"),
-        (
-            "Measure FP8 Quantization Error",
-            "python tests/measure_quantization_error.py \\\n"
-            "    --original model_bf16.safetensors \\\n"
-            "    --quantized model_fp8.safetensors",
-        ),
-        (
-            "Save Detailed Report",
-            "python tests/measure_quantization_error.py \\\n"
-            "    --original model_bf16.safetensors \\\n"
-            "    --quantized model_fp8.safetensors \\\n"
-            "    --output-report error_report.json",
-        ),
-        (
-            "Compare Only Attention Layers",
-            "python tests/measure_quantization_error.py \\\n"
-            "    --original model_bf16.safetensors \\\n"
-            "    --quantized model_fp8.safetensors \\\n"
-            '    --layers-to-compare "attention"',
-        ),
-        (
-            "Use CPU Instead of GPU",
-            "python tests/measure_quantization_error.py \\\n"
-            "    --original model_bf16.safetensors \\\n"
-            "    --quantized model_fp8.safetensors \\\n"
-            "    --device cpu",
-        ),
+        ("Measure FP8 Quantization Error", "python tests/measure_quantization_error.py \\\n    --original model_bf16.safetensors \\\n    --quantized model_fp8.safetensors"),
+        ("Save Detailed Report", "python tests/measure_quantization_error.py \\\n    --original model_bf16.safetensors \\\n    --quantized model_fp8.safetensors \\\n    --output-report error_report.json"),
+        ("Compare Only Attention Layers", 'python tests/measure_quantization_error.py \\\n    --original model_bf16.safetensors \\\n    --quantized model_fp8.safetensors \\\n    --layers-to-compare "attention"'),
+        ("Use CPU Instead of GPU", "python tests/measure_quantization_error.py \\\n    --original model_bf16.safetensors \\\n    --quantized model_fp8.safetensors \\\n    --device cpu"),
     ]
 
     for title, cmd in examples:

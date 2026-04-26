@@ -21,14 +21,7 @@ from ..utils.comfy_quant import create_comfy_quant_tensor, fix_comfy_quant_param
 from ..utils.logging import info, verbose, debug, minimal, warning, error, log_debug
 
 
-def convert_fp8_scaled_to_comfy_quant(
-    input_file: str,
-    output_file: str,
-    hp_filter: Optional[str] = None,
-    full_precision_mm: bool = False,
-    include_input_scale: bool = False,
-    save_quant_metadata: bool = True,
-):
+def convert_fp8_scaled_to_comfy_quant(input_file: str, output_file: str, hp_filter: Optional[str] = None, full_precision_mm: bool = False, include_input_scale: bool = False, save_quant_metadata: bool = True):
     """
     Convert legacy fp8_scaled format to comfy_quant format.
 
@@ -238,9 +231,7 @@ def convert_fp8_scaled_to_comfy_quant(
                 verbose(f"    → Format: {format_type} (scale ndim={scale_weight.ndim} unknown)")
 
             # Create .comfy_quant metadata
-            comfy_quant_tensor = create_comfy_quant_tensor(
-                format_type, block_size=block_size, full_precision_matrix_mult=full_precision_mm if full_precision_mm else None
-            )
+            comfy_quant_tensor = create_comfy_quant_tensor(format_type, block_size=block_size, full_precision_matrix_mult=full_precision_mm if full_precision_mm else None)
             output_tensors[f"{base_name}.comfy_quant"] = comfy_quant_tensor
 
             # Collect metadata if enabled

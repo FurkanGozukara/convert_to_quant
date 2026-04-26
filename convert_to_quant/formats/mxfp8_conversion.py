@@ -196,9 +196,7 @@ def convert_to_mxfp8(
             in_features = shape[1]
             if in_features not in calibration_data_cache:
                 verbose(f"  - Found new input dimension: {in_features}.")
-                calibration_data_cache[in_features] = torch.randn(
-                    calib_samples, in_features, dtype=COMPUTE_DTYPE, generator=seed_generator, device=seed_device
-                )
+                calibration_data_cache[in_features] = torch.randn(calib_samples, in_features, dtype=COMPUTE_DTYPE, generator=seed_generator, device=seed_device)
     info("Simulated calibration data generated.\n")
 
     info(f"Found {total_weights} weight tensors to potentially process.")
@@ -308,21 +306,13 @@ def convert_to_mxfp8(
                     bias_correction = output_error.mean(dim=0)
                     b_new = b_orig_dev - bias_correction
                     output_tensors[bias_key] = b_new.to(device="cpu", dtype=original_bias.dtype)
-                    verbose(
-                        f"    - Original bias mean : {original_bias.mean().item():.6f}\n"
-                        f"    - Corrected bias mean: {output_tensors[bias_key].mean().item():.6f}"
-                    )
+                    verbose(f"    - Original bias mean : {original_bias.mean().item():.6f}\n    - Corrected bias mean: {output_tensors[bias_key].mean().item():.6f}")
                     del (W_orig_dev, W_dequant_dev, X_calib_dev, b_orig_dev, weight_error, output_error, bias_correction, b_new)
                     if device == "cuda":
                         torch.cuda.empty_cache()
 
         # Always create .comfy_quant metadata tensor (required for MXFP8)
-        metadata = {
-            "format": "mxfp8",
-            "group_size": MXFP8_BLOCK_SIZE,
-            "orig_dtype": str(tensor.dtype),
-            "orig_shape": list(tensor.shape),
-        }
+        metadata = {"format": "mxfp8", "group_size": MXFP8_BLOCK_SIZE, "orig_dtype": str(tensor.dtype), "orig_shape": list(tensor.shape)}
         output_tensors[f"{base_key}.comfy_quant"] = dict_to_tensor(metadata)
         quant_metadata[base_key] = metadata
 

@@ -98,13 +98,9 @@ def load_layer_config(config_path: str) -> Dict[str, Any]:
 
         fmt = settings["format"]
         if not fmt:  # Empty string check
-            raise ValueError(
-                f"Layer config entry '{key}' has empty 'format' field. Use skip:true to skip, or specify a valid format."
-            )
+            raise ValueError(f"Layer config entry '{key}' has empty 'format' field. Use skip:true to skip, or specify a valid format.")
         if fmt not in VALID_QUANT_FORMATS:
-            raise ValueError(
-                f"Layer config entry '{key}' has invalid format '{fmt}'. Valid formats: {sorted(VALID_QUANT_FORMATS)}"
-            )
+            raise ValueError(f"Layer config entry '{key}' has invalid format '{fmt}'. Valid formats: {sorted(VALID_QUANT_FORMATS)}")
 
     # Store compiled patterns in config for reuse
     config["_compiled_patterns"] = compiled_patterns
