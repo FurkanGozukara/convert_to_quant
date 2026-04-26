@@ -10,16 +10,17 @@ don't support native MXFP8 (e.g., Ada Lovelace/SM 8.9) by using the
 tensorwise scale for standard FP8 matmul.
 """
 
-import os
 import json
+import os
+from typing import Any, Dict, Optional
+
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
-from typing import Dict, Optional, Any
 
 from ..utils.float_utils import e8m0_to_f32
+from ..utils.logging import error, info, verbose, warning
 from ..utils.tensor_utils import dict_to_tensor, tensor_to_dict
-from ..utils.logging import info, warning, error, verbose
 
 
 def _compute_tensorwise_scale(block_scales: torch.Tensor) -> torch.Tensor:

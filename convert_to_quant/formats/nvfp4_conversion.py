@@ -10,18 +10,19 @@ Use --simple to switch to raw NVFP4Converter.
 
 import gc
 import os
+from typing import Dict, Optional
+
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
-from typing import Dict, Optional
 
-from ..constants import AVOID_KEY_NAMES, MODEL_FILTERS, FP4_BLOCK_SIZE, NORMALIZE_SCALES_ENABLED, COMPUTE_DTYPE
-from ..converters.nvfp4_converter import NVFP4Converter
+from ..constants import AVOID_KEY_NAMES, COMPUTE_DTYPE, FP4_BLOCK_SIZE, MODEL_FILTERS, NORMALIZE_SCALES_ENABLED
 from ..converters.learned_nvfp4 import LearnedNVFP4Converter
-from ..utils.tensor_utils import dict_to_tensor, normalize_tensorwise_scales
+from ..converters.nvfp4_converter import NVFP4Converter
 from ..utils.comfy_quant import should_skip_layer_for_performance
+from ..utils.logging import debug, error, info, log_debug, minimal, verbose, warning
 from ..utils.memory_efficient_loader import UnifiedSafetensorsLoader
-from ..utils.logging import info, verbose, debug, minimal, warning, error, log_debug
+from ..utils.tensor_utils import dict_to_tensor, normalize_tensorwise_scales
 
 
 @log_debug

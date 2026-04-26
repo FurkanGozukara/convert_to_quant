@@ -7,15 +7,15 @@ Handles .comfy_quant tensor creation, parsing, editing, and performance heuristi
 import json
 import os
 import re
+from typing import Any, Dict, List, Optional, Tuple
+
 import torch
-from typing import Dict, Tuple, Optional, Any, List
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-from .tensor_utils import dict_to_tensor, tensor_to_dict, normalize_tensorwise_scales
 from ..constants import NORMALIZE_SCALES_ENABLED
-from .logging import info, verbose, warning, error, minimal
-
+from .logging import error, info, minimal, verbose, warning
+from .tensor_utils import dict_to_tensor, normalize_tensorwise_scales, tensor_to_dict
 
 # Block-based formats that require group_size
 BLOCK_BASED_FORMATS = ("int8_blockwise", "float8_e4m3fn_blockwise")

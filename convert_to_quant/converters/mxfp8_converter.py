@@ -10,12 +10,12 @@ Based on comfy-kitchen (Comfy Org, Apache-2.0).
 """
 
 import math
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import torch
 
-from ..constants import MXFP8_BLOCK_SIZE, MXFP8_DTYPE, E8M0_BIAS, COMPUTE_DTYPE
-from ..utils.float_utils import roundup, e8m0_to_f32, mxfp8_to_blocked, mxfp8_from_blocked
+from ..constants import COMPUTE_DTYPE, E8M0_BIAS, MXFP8_BLOCK_SIZE, MXFP8_DTYPE
+from ..utils.float_utils import e8m0_to_f32, mxfp8_from_blocked, mxfp8_to_blocked, roundup
 from ..utils.logging import info
 
 # Check for comfy-kitchen availability

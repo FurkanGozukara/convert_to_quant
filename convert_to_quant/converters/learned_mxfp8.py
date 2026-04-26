@@ -11,16 +11,16 @@ Requires SM >= 10.0 (Blackwell) for hardware-accelerated matmul.
 
 import gc
 import math
-from typing import Tuple, Optional, Dict
+from typing import Dict, Optional, Tuple
 
 import torch
 from torch.optim import AdamW, RAdam
 from tqdm import tqdm
 
-from ..constants import MXFP8_BLOCK_SIZE, MXFP8_DTYPE, E8M0_BIAS, COMPUTE_DTYPE, SCALE_DTYPE
-from ..utils.float_utils import roundup, e8m0_to_f32, mxfp8_to_blocked, mxfp8_from_blocked
+from ..constants import COMPUTE_DTYPE, E8M0_BIAS, MXFP8_BLOCK_SIZE, MXFP8_DTYPE, SCALE_DTYPE
 from ..pinned_transfer import transfer_to_gpu_pinned
-from ..utils.logging import verbose, debug, minimal, info
+from ..utils.float_utils import e8m0_to_f32, mxfp8_from_blocked, mxfp8_to_blocked, roundup
+from ..utils.logging import debug, info, minimal, verbose
 from .base_converter import BaseLearnedConverter
 
 # Check for comfy-kitchen availability

@@ -10,12 +10,12 @@ Based on comfy-kitchen (Comfy Org, Apache-2.0) and PyTorch AO (Meta, BSD-3-Claus
 """
 
 import math
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import torch
 
-from ..constants import FP4_E2M1_MAX, FP4_BLOCK_SIZE, COMPUTE_DTYPE
-from ..utils.float_utils import F8_E4M3_MAX, roundup, pack_uint4, unpack_uint4, to_blocked, from_blocked, _f32_to_floatx_unpacked, _floatx_unpacked_to_f32, _float8_round, F4_E2M1_EBITS, F4_E2M1_MBITS
+from ..constants import COMPUTE_DTYPE, FP4_BLOCK_SIZE, FP4_E2M1_MAX
+from ..utils.float_utils import F4_E2M1_EBITS, F4_E2M1_MBITS, F8_E4M3_MAX, _f32_to_floatx_unpacked, _float8_round, _floatx_unpacked_to_f32, from_blocked, pack_uint4, roundup, to_blocked, unpack_uint4
 
 # Check for comfy-kitchen availability
 try:

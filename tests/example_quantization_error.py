@@ -10,19 +10,21 @@ This script demonstrates the quantization error measurement workflow by:
 Run this to test the measurement framework without needing large model files.
 """
 
-import torch
 import json
 import os
-from pathlib import Path
-from safetensors.torch import save_file
 import sys
+from pathlib import Path
+
+import torch
+from safetensors.torch import save_file
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from convert_to_quant.utils.comfy_quant import create_comfy_quant_tensor
-from convert_to_quant.utils.logging import setup_logging, info, verbose
 from measure_quantization_error import QuantizationErrorMeasurer
+
+from convert_to_quant.utils.comfy_quant import create_comfy_quant_tensor
+from convert_to_quant.utils.logging import info, setup_logging, verbose
 
 
 def create_synthetic_bf16_model(output_path: str, num_layers: int = 5):

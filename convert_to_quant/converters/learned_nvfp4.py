@@ -11,16 +11,16 @@ Requires SM >= 10.0 (datacenter Blackwell) or SM >= 12.0 (consumer RTX 50 series
 
 import gc
 import math
-from typing import Tuple, Optional, Dict
+from typing import Dict, Optional, Tuple
 
 import torch
 from torch.optim import AdamW, RAdam
 from tqdm import tqdm
 
-from ..constants import FP4_E2M1_MAX, FP4_BLOCK_SIZE, COMPUTE_DTYPE, SCALE_DTYPE
-from ..utils.float_utils import F8_E4M3_MAX, roundup, pack_uint4, unpack_uint4, to_blocked, from_blocked, _f32_to_floatx_unpacked, _floatx_unpacked_to_f32, _float8_round, F4_E2M1_EBITS, F4_E2M1_MBITS
+from ..constants import COMPUTE_DTYPE, FP4_BLOCK_SIZE, FP4_E2M1_MAX, SCALE_DTYPE
 from ..pinned_transfer import transfer_to_gpu_pinned
-from ..utils.logging import info, verbose, debug, minimal
+from ..utils.float_utils import F4_E2M1_EBITS, F4_E2M1_MBITS, F8_E4M3_MAX, _f32_to_floatx_unpacked, _float8_round, _floatx_unpacked_to_f32, from_blocked, pack_uint4, roundup, to_blocked, unpack_uint4
+from ..utils.logging import debug, info, minimal, verbose
 from .base_converter import BaseLearnedConverter
 
 # Check for comfy-kitchen availability

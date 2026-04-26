@@ -5,25 +5,26 @@ Entry point that handles argument parsing and dispatches to appropriate conversi
 """
 
 import argparse
+import json
 import os
 import sys
+
 import torch
+from safetensors import safe_open
 from safetensors.torch import load_file, save_file
 
-from .argument_parser import MultiHelpArgumentParser, EXPERIMENTAL_ARGS, FILTER_ARGS, ADVANCED_ARGS, LEARNED_ROUNDING_ARGS, MODES_ARGS, LORA_ARGS
-from ..constants import NORMALIZE_SCALES_ENABLED, TARGET_FP8_DTYPE, MODEL_FILTERS
-from ..config.layer_config import load_layer_config, generate_config_template
-from ..formats.fp8_conversion import convert_to_fp8_scaled
+from ..config.layer_config import generate_config_template, load_layer_config
+from ..constants import MODEL_FILTERS, NORMALIZE_SCALES_ENABLED, TARGET_FP8_DTYPE
 from ..formats.format_migration import convert_fp8_scaled_to_comfy_quant
+from ..formats.fp8_conversion import convert_to_fp8_scaled
+from ..formats.hybrid_mxfp8_conversion import convert_to_hybrid_mxfp8
 from ..formats.int8_conversion import convert_int8_to_comfy_quant
 from ..formats.legacy_utils import add_legacy_input_scale, cleanup_fp8_scaled
-from ..formats.nvfp4_conversion import convert_to_nvfp4
 from ..formats.mxfp8_conversion import convert_to_mxfp8
-from ..formats.hybrid_mxfp8_conversion import convert_to_hybrid_mxfp8
-from ..utils.comfy_quant import edit_comfy_quant
+from ..formats.nvfp4_conversion import convert_to_nvfp4
 from ..pinned_transfer import set_verbose as set_pinned_verbose
-import json
-from safetensors import safe_open
+from ..utils.comfy_quant import edit_comfy_quant
+from .argument_parser import ADVANCED_ARGS, EXPERIMENTAL_ARGS, FILTER_ARGS, LEARNED_ROUNDING_ARGS, LORA_ARGS, MODES_ARGS, MultiHelpArgumentParser
 
 
 def load_input_scales(path: str) -> dict:
@@ -78,7 +79,7 @@ def extract_filter_flags(args) -> dict:
     return flags
 
 
-from ..utils.logging import setup_logging, info, minimal, warning
+from ..utils.logging import info, minimal, setup_logging, warning
 
 
 def main():
@@ -568,9 +569,9 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
     # Handle activation scale calibration mode (separate workflow)
     if args.actcal:
         try:
-            from .calibrate_activation_scales import calibrate_model, patch_model_with_scales, load_lora_tensors
+            from .calibrate_activation_scales import calibrate_model, load_lora_tensors, patch_model_with_scales
         except ImportError:
-            from calibrate_activation_scales import calibrate_model, patch_model_with_scales, load_lora_tensors
+            from calibrate_activation_scales import calibrate_model, load_lora_tensors, patch_model_with_scales
 
         if not args.output:
             base = os.path.splitext(args.input)[0]
