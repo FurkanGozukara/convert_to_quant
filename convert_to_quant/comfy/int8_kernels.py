@@ -1061,3 +1061,182 @@ def int8_gelu(x: torch.Tensor, s_x: torch.Tensor, block_size: int = 128) -> Tupl
         s_y = s_y.reshape(*batch_shape, SN)
 
     return y, s_y
+
+
+# ==============================================================================
+# INT8 Row-Wise Kernels
+# ==============================================================================
+from triton.language.extra import libdevice
+
+@triton.jit
+def _quantize_rowwise_kernel(
+    x_ptr,      # Input pointer (FP16/BF16)
+    y_ptr,      # Output pointer (INT8)
+    s_ptr,      # Scale pointer (FP32)
+    n_elements, # Number of columns
+    BLOCK_SIZE: tl.constexpr,
+):
+    # Row index we are processing
+    row_idx = tl.program_id(0)
+
+    # Pointers to the start of the row
+    x_row_ptr = x_ptr + row_idx * n_elements
+    y_row_ptr = y_ptr + row_idx * n_elements
+
+    # 1. Compute Max Abs Value for the row
+    offsets = tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+
+    # Load data
+    x = tl.load(x_row_ptr + offsets, mask=mask, other=0.0)
+
+    # Absolute value
+    abs_x = tl.abs(x)
+
+    # Reduction to find max
+    max_val = tl.max(abs_x, axis=0)
+
+    # 2. Compute Scale
+    scale = tl.maximum(max_val / 127.0, 1e-30)
+
+    # 3. Quantize
+    q_f = x / scale
+
+    # Round and Clamp
+    q_i = libdevice.rint(q_f).to(tl.int32)
+    q_i = tl.clamp(q_i, -128.0, 127.0)
+
+    # 4. Store
+    tl.store(y_row_ptr + offsets, q_i.to(tl.int8), mask=mask)
+    tl.store(s_ptr + row_idx, scale.to(tl.float32))
+
+def act_quant_rowwise(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Input: [Batch, Dim] (float16/bfloat16/float32)
+    Output: [Batch, Dim] (int8), [Batch, 1] (float32)
+    """
+    original_shape = x.shape
+    x_2d = x.reshape(-1, original_shape[-1])
+    rows, cols = x_2d.shape
+
+    y = torch.empty_like(x_2d, dtype=torch.int8)
+    s = torch.empty((rows, 1), device=x_2d.device, dtype=torch.float32)
+
+    # Heuristic for block size
+    BLOCK_SIZE = triton.next_power_of_2(cols)
+    if BLOCK_SIZE < 128: BLOCK_SIZE = 128
+
+    grid = (rows,)
+    _quantize_rowwise_kernel[grid](x_2d, y, s, cols, BLOCK_SIZE=BLOCK_SIZE)
+
+    if len(original_shape) > 2:
+        y = y.reshape(*original_shape)
+        s = s.reshape(*original_shape[:-1], 1)
+
+    return y, s
+
+@triton.autotune(
+    configs=[
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 256, 'BLOCK_K': 64, 'GROUP_SIZE_M': 8}, num_stages=3, num_warps=8),
+        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 256, 'BLOCK_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'BLOCK_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64,  'BLOCK_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 128, 'BLOCK_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 32,  'BLOCK_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+    ],
+    key=['M', 'N', 'K'],
+)
+@triton.jit
+def int8_gemm_per_row_kernel(
+    a_ptr, b_ptr, c_ptr,
+    a_scale_ptr, b_scale_ptr, bias_ptr,
+    M, N, K,
+    stride_am, stride_ak,
+    stride_bk, stride_bn,
+    stride_cm, stride_cn,
+    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr,
+    HAS_BIAS: tl.constexpr
+):
+    """
+    Computes: C = ((A * B) * (scale_a[:, None] * scale_b[None, :])) + bias
+    A: [M, K] int8, scale_a: [M, 1] per-row activation scales
+    B: [N, K] int8, scale_b: [N, 1] per-row weight scales
+    """
+    pid = tl.program_id(axis=0)
+    num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
+    num_pid_in_group = GROUP_SIZE_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_SIZE_M
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+    pid_m = first_pid_m + (pid % group_size_m)
+    pid_n = (pid % num_pid_in_group) // group_size_m
+
+    offs_am = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M)) % M
+    offs_bn = (pid_n * BLOCK_N + tl.arange(0, BLOCK_N)) % N
+    offs_k = tl.arange(0, BLOCK_K)
+
+    a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
+    b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+
+    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.int32)
+
+    for k in range(0, tl.cdiv(K, BLOCK_K)):
+        a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_K, other=0.0)
+        b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_K, other=0.0)
+        accumulator += tl.dot(a, b)
+        a_ptrs += BLOCK_K * stride_ak
+        b_ptrs += BLOCK_K * stride_bk
+
+    scale_a = tl.load(a_scale_ptr + offs_am)
+    scale_b = tl.load(b_scale_ptr + offs_bn)
+
+    c = accumulator.to(tl.float32)
+    total_scale = scale_a[:, None] * scale_b[None, :]
+    c = c * total_scale
+
+    if HAS_BIAS:
+        bias = tl.load(bias_ptr + offs_bn)
+        c = c + bias[None, :]
+
+    c_ptrs = c_ptr + stride_cm * offs_am[:, None] + stride_cn * offs_bn[None, :]
+    c_mask = (offs_am[:, None] < M) & (offs_bn[None, :] < N)
+    tl.store(c_ptrs, c, mask=c_mask)
+
+def int8_gemm_per_row(a: torch.Tensor, a_s: torch.Tensor, b: torch.Tensor, b_s: torch.Tensor) -> torch.Tensor:
+    return int8_addmm_per_row(a, a_s, b, b_s, bias=None)
+
+def int8_addmm_per_row(a: torch.Tensor, a_s: torch.Tensor, b: torch.Tensor, b_s: torch.Tensor, bias: torch.Tensor = None) -> torch.Tensor:
+    assert a.is_contiguous() and b.is_contiguous(), "Input tensors must be contiguous"
+    assert b.dim() == 2, f"Expected b to be 2D, got shape {b.shape}"
+
+    a_shape_orig = a.shape
+    a_2d = a.reshape(-1, a_shape_orig[-1])
+    M, K = a_2d.shape
+    N = b.shape[0]
+
+    a_s_2d = a_s.reshape(M)
+    b_s_1d = b_s.reshape(N).contiguous()
+
+    output = torch.empty((M, N), device=a.device, dtype=torch.float16)
+
+    has_bias = bias is not None
+    bias_ptr = bias if has_bias else a_2d
+
+    grid = lambda META: (triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']), )
+
+    int8_gemm_per_row_kernel[grid](
+        a_ptr=a_2d,
+        b_ptr=b,
+        c_ptr=output,
+        a_scale_ptr=a_s_2d,
+        b_scale_ptr=b_s_1d,
+        bias_ptr=bias_ptr,
+        M=M, N=N, K=K,
+        stride_am=a_2d.stride(0), stride_ak=a_2d.stride(1),
+        stride_bk=b.stride(1), stride_bn=b.stride(0),
+        stride_cm=output.stride(0), stride_cn=output.stride(1),
+        HAS_BIAS=has_bias
+    )
+    return output.reshape(a_shape_orig[:-1] + (N,))

@@ -688,6 +688,8 @@ In JSON, backslashes must be doubled (\\\\. for literal dot). See DEVELOPMENT.md
             format_str = "int8"
             if args.scaling_mode == "tensor":
                 scaling_str = "_tensorwise"
+            elif args.scaling_mode == "row":
+                scaling_str = "_rowwise"
             else:
                 scaling_str = f"_bs{args.block_size}"
         else:
