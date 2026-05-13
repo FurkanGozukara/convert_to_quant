@@ -85,7 +85,13 @@ def convert_to_fp8_scaled(
     info(f"Processing: {input_file}\nOutput will be saved to: {output_file}")
     info("-" * 60)
     if int8:
-        info("Target format: INT8 (block-wise quantization)")
+        scaling_mode = converter_kwargs.get("scaling_mode", "block")
+        if scaling_mode == "row":
+            info("Target format: INT8 (row-wise quantization)")
+        elif scaling_mode == "tensor":
+            info("Target format: INT8 (tensor-wise quantization)")
+        else:
+            info("Target format: INT8 (block-wise quantization)")
         info(f"INT8 Range: [{-INT8_SYMMETRIC_MAX}, {INT8_SYMMETRIC_MAX}]")
     else:
         info(f"Target FP8 format: {TARGET_FP8_DTYPE}\nFP8 Range: [{FP8_MIN}, {FP8_MAX}]")
@@ -454,7 +460,7 @@ def convert_to_fp8_scaled(
                 comfy_quant_tensor = create_comfy_quant_tensor("nvfp4", block_size=16, full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None)
             elif is_int8:
                 new_tensors[f"{base_name}.weight_scale"] = dequant_s.to(device="cpu", dtype=SCALE_DTYPE).detach().clone()
-                if converter.scaling_mode == "tensor":
+                if converter.scaling_mode in ("tensor", "row"):
                     comfy_quant_format = "int8_tensorwise"
                     block_size_for_meta = None
                 else:
@@ -463,7 +469,7 @@ def convert_to_fp8_scaled(
 
                 # Use correct INT8 format
                 comfy_quant_tensor = create_comfy_quant_tensor(comfy_quant_format, block_size=block_size_for_meta, full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None)
-                # Add input_scale only for block-wise INT8
+                # Add input_scale only for block-wise INT8 (dynamic quantization for rowwise doesn't use it)
                 if comfy_quant_format == "int8_blockwise":
                     new_tensors[f"{base_name}.input_scale"] = torch.tensor(1.0, dtype=torch.float32, device="cpu")
             else:

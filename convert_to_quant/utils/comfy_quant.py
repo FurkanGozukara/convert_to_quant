@@ -27,7 +27,7 @@ def create_comfy_quant_tensor(format_type: str, block_size: Optional[int] = None
 
     Args:
         format_type: One of "float8_e4m3fn", "float8_e4m3fn_rowwise", "float8_e4m3fn_blockwise",
-                     or "int8_blockwise"
+                     "int8_tensorwise", or "int8_blockwise"
         block_size: Block/group size for quantization (for block-based formats)
         full_precision_matrix_mult: If True, adds "full_precision_matrix_mult": True.
                                     If False or None, this key is omitted.

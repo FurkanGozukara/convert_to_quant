@@ -43,8 +43,8 @@ class LearnedRoundingConverter(BaseLearnedConverter):
         self.block_size = block_size
         self.target_format = target_format
 
-        # INT8 defaults to block-wise scaling, but allows tensor-wise
-        if target_format == "int8" and scaling_mode not in ("tensor", "block"):
+        # INT8 defaults to block-wise scaling, but allows tensor-wise and row-wise
+        if target_format == "int8" and scaling_mode not in ("tensor", "row", "block"):
             scaling_mode = "block"
         # Normalize block3d alias to block
         if scaling_mode == "block3d":
@@ -551,7 +551,7 @@ class LearnedRoundingConverter(BaseLearnedConverter):
 
         # INT8 quantization path
         if self.target_format == "int8":
-            if self.scaling_mode == "tensor":
+            if self.scaling_mode in ("tensor", "row"):
                 qdata, scale, dequantized = self._convert_int8_tensorwise(W_float32)
             else:
                 qdata, scale, dequantized = self._convert_int8(W_float32)
@@ -617,23 +617,33 @@ class LearnedRoundingConverter(BaseLearnedConverter):
 
     def _convert_int8_tensorwise(self, W_float32: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        INT8 tensor-wise quantization.
+        INT8 tensor-wise/row-wise quantization.
 
-        Uses global scale: scale = 127 / max(abs(W))
+        Uses TensorWiseINT8Layout which handles both global and per-row scales.
         """
         from ..comfy.quant_ops import TensorWiseINT8Layout
 
         # Initial quantization
-        qdata, layout_params = TensorWiseINT8Layout.quantize(W_float32, is_weight=True)
-        scale = layout_params["scale"]  # Global scale (scalar)
+        # We need to manually handle tensor-wise vs row-wise if auto-quantizing
+        if self.scaling_mode == "tensor":
+            # Global scale
+            w_max = W_float32.abs().max()
+            dequant_scale = w_max.clamp_min(1e-12) / 127.0
+            # Pass the pre-computed scale to quantize
+            qdata, layout_params = TensorWiseINT8Layout.quantize(W_float32, scale=dequant_scale, is_weight=True)
+            scale = dequant_scale
+        else:
+            # Row-wise (default for TensorWiseINT8Layout if is_weight=True)
+            qdata, layout_params = TensorWiseINT8Layout.quantize(W_float32, is_weight=True)
+            scale = layout_params["scale"]
 
         # Optional: Apply learned rounding optimization for INT8
         if not self.no_learned_rounding and self.num_iter > 0:
-            verbose("    - Applying learned rounding optimization for INT8 (tensor-wise)...")
-            qdata, scale = self._optimize_int8_tensorwise_learned_rounding(W_float32, qdata, scale)
-
-        # Re-create layout params with potentially updated scale
-        layout_params["scale"] = scale
+            verbose(f"    - Applying learned rounding optimization for INT8 ({self.scaling_mode}-wise)...")
+            if self.scaling_mode == "tensor":
+                qdata, scale = self._optimize_int8_tensorwise_learned_rounding(W_float32, qdata, scale)
+            else:
+                qdata, scale = self._optimize_int8_learned_rounding(W_float32, qdata, scale, scaling_mode="row")
 
         # Dequantize for bias correction
         dequantized_weight = TensorWiseINT8Layout.dequantize(qdata, scale, orig_dtype=COMPUTE_DTYPE)
@@ -645,6 +655,8 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             torch.cuda.empty_cache()
 
         return (qdata, scale.to(device=self.device, dtype=SCALE_DTYPE), dequantized_weight)
+
+    # _convert_int8_rowwise merged into _convert_int8_tensorwise
 
     def _optimize_int8_tensorwise_learned_rounding(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -715,7 +727,27 @@ class LearnedRoundingConverter(BaseLearnedConverter):
         dequantized = dequantized.permute(0, 2, 1, 3).reshape(M, N)
         return dequantized
 
-    def _optimize_int8_learned_rounding(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _int8_dequantize_rowwise(self, qdata: torch.Tensor, scale: torch.Tensor, M: int, N: int) -> torch.Tensor:
+        """
+        Differentiable row-wise INT8 dequantization for optimization.
+
+        Args:
+            qdata: Quantized values (can be float during optimization), shape (M, N)
+            scale: Per-row scales, shape (M, 1) or (M,)
+            M, N: Original tensor dimensions
+
+        Returns:
+            Dequantized tensor, shape (M, N)
+        """
+        if scale.dim() == 1:
+            scale_broadcast = scale.unsqueeze(1)
+        else:
+            scale_broadcast = scale
+
+        dequantized = qdata * scale_broadcast
+        return dequantized
+
+    def _optimize_int8_learned_rounding(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, scaling_mode: str = "block") -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Apply learned rounding optimization for INT8 quantization.
         Uses SVD-based optimization similar to FP8 but adapted for INT8.
@@ -725,13 +757,13 @@ class LearnedRoundingConverter(BaseLearnedConverter):
 
         # Route to appropriate optimizer
         if self.optimizer_choice == "original":
-            final_qdata = self._optimize_int8_original(W_float32, qdata, scale, U_k, Vh_k)
+            final_qdata = self._optimize_int8_original(W_float32, qdata, scale, U_k, Vh_k, scaling_mode)
         elif self.optimizer_choice == "adamw":
-            final_qdata = self._optimize_int8_adamw(W_float32, qdata, scale, U_k, Vh_k)
+            final_qdata = self._optimize_int8_adamw(W_float32, qdata, scale, U_k, Vh_k, scaling_mode)
         elif self.optimizer_choice == "radam":
-            final_qdata = self._optimize_int8_radam(W_float32, qdata, scale, U_k, Vh_k)
+            final_qdata = self._optimize_int8_radam(W_float32, qdata, scale, U_k, Vh_k, scaling_mode)
         elif self.optimizer_choice == "prodigy":
-            final_qdata = self._optimize_int8_prodigy(W_float32, qdata, scale, U_k, Vh_k)
+            final_qdata = self._optimize_int8_prodigy(W_float32, qdata, scale, U_k, Vh_k, scaling_mode)
         else:
             raise ValueError(f"Unknown optimizer: '{self.optimizer_choice}'")
 
@@ -739,7 +771,7 @@ class LearnedRoundingConverter(BaseLearnedConverter):
 
         return final_qdata, scale
 
-    def _optimize_int8_adamw(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor) -> torch.Tensor:
+    def _optimize_int8_adamw(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor, scaling_mode: str = "block") -> torch.Tensor:
         """INT8 optimization using AdamW optimizer with manual LR scheduling."""
         M, N = W_float32.shape
         block_size = self.block_size
@@ -762,7 +794,13 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             optimizer.zero_grad()
 
             q_refined = qdata_float + delta
-            current_dq = self._int8_dequantize_blockwise(q_refined, scale, M, N, block_size)
+
+            if scaling_mode == "block":
+                current_dq = self._int8_dequantize_blockwise(q_refined, scale, M, N, block_size)
+            elif scaling_mode == "row":
+                current_dq = self._int8_dequantize_rowwise(q_refined, scale, M, N)
+            else:
+                raise ValueError(f"Unsupported scaling mode for INT8 learned rounding: {scaling_mode}")
 
             error = current_dq - W_float32
             projected_error = U_k.T @ error @ Vh_k.T
@@ -830,7 +868,7 @@ class LearnedRoundingConverter(BaseLearnedConverter):
         del qdata_float, delta
         return final_qdata
 
-    def _optimize_int8_radam(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor) -> torch.Tensor:
+    def _optimize_int8_radam(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor, scaling_mode: str = "block") -> torch.Tensor:
         """INT8 optimization using RAdam optimizer with manual LR scheduling."""
         M, N = W_float32.shape
         block_size = self.block_size
@@ -853,7 +891,13 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             optimizer.zero_grad()
 
             q_refined = qdata_float + delta
-            current_dq = self._int8_dequantize_blockwise(q_refined, scale, M, N, block_size)
+
+            if scaling_mode == "block":
+                current_dq = self._int8_dequantize_blockwise(q_refined, scale, M, N, block_size)
+            elif scaling_mode == "row":
+                current_dq = self._int8_dequantize_rowwise(q_refined, scale, M, N)
+            else:
+                raise ValueError(f"Unsupported scaling mode for INT8 learned rounding: {scaling_mode}")
 
             error = current_dq - W_float32
             projected_error = U_k.T @ error @ Vh_k.T
@@ -921,7 +965,7 @@ class LearnedRoundingConverter(BaseLearnedConverter):
         del qdata_float, delta
         return final_qdata
 
-    def _optimize_int8_prodigy(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor) -> torch.Tensor:
+    def _optimize_int8_prodigy(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor, scaling_mode: str = "block") -> torch.Tensor:
         """INT8 optimization using ProdigyPlusScheduleFree optimizer."""
         from prodigyplus.prodigy_plus_schedulefree import ProdigyPlusScheduleFree
 
@@ -946,7 +990,13 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             optimizer.zero_grad()
 
             q_refined = qdata_float + delta
-            current_dq = self._int8_dequantize_blockwise(q_refined, scale, M, N, block_size)
+
+            if scaling_mode == "block":
+                current_dq = self._int8_dequantize_blockwise(q_refined, scale, M, N, block_size)
+            elif scaling_mode == "row":
+                current_dq = self._int8_dequantize_rowwise(q_refined, scale, M, N)
+            else:
+                raise ValueError(f"Unsupported scaling mode for INT8 learned rounding: {scaling_mode}")
 
             error = current_dq - W_float32
             projected_error = U_k.T @ error @ Vh_k.T
@@ -1010,7 +1060,7 @@ class LearnedRoundingConverter(BaseLearnedConverter):
         del qdata_float, delta
         return final_qdata
 
-    def _optimize_int8_original(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor) -> torch.Tensor:
+    def _optimize_int8_original(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor, scaling_mode: str = "block") -> torch.Tensor:
         """INT8 optimization using original gradient-based optimizer (no autograd)."""
         M, N = W_float32.shape
         block_size = self.block_size
@@ -1055,7 +1105,12 @@ class LearnedRoundingConverter(BaseLearnedConverter):
         pbar = tqdm(range(self.num_iter), desc=f"    Optimizing INT8 (Original-{schedule_name})", leave=False, dynamic_ncols=True)
         for i in pbar:
             with torch.no_grad():
-                current_dq = self._int8_dequantize_blockwise(q_refined, scale, M, N, block_size)
+                if scaling_mode == "block":
+                    current_dq = self._int8_dequantize_blockwise(q_refined, scale, M, N, block_size)
+                elif scaling_mode == "row":
+                    current_dq = self._int8_dequantize_rowwise(q_refined, scale, M, N)
+                else:
+                    raise ValueError(f"Unsupported scaling mode for INT8 learned rounding: {scaling_mode}")
                 error = current_dq - W_float32
                 projected_error = U_k.T @ error @ Vh_k.T
                 loss = torch.linalg.norm(projected_error)
@@ -1132,20 +1187,29 @@ class LearnedRoundingConverter(BaseLearnedConverter):
                 # Compute gradient direction in INT8 quantized space
                 #
                 # Math derivation:
-                # - Dequantization: dq = Q * scale (per-block)
+                # - Dequantization: dq = Q * scale (per-block or per-row)
                 # - Loss L is computed on dq
                 # - By chain rule: ∂L/∂Q = ∂L/∂dq * ∂dq/∂Q = ∂L/∂dq * scale
                 #
                 # So we need to MULTIPLY the weight-space gradient by scale to get Q-space gradient
                 grad_direction = U_k @ (projected_error / loss.clamp_min(1e-20)) @ Vh_k
 
-                # Transform gradient through block-wise structure
-                # Reshape grad to blocks, multiply by scale (chain rule), then reshape back
-                grad_blocked = grad_direction.reshape(M // block_size, block_size, N // block_size, block_size)
-                grad_blocked = grad_blocked.permute(0, 2, 1, 3)
-                scale_broadcast = scale.unsqueeze(-1).unsqueeze(-1)
-                grad_scaled = grad_blocked * scale_broadcast
-                grad_scaled = grad_scaled.permute(0, 2, 1, 3).reshape(M, N)
+                if scaling_mode == "block":
+                    # Transform gradient through block-wise structure
+                    # Reshape grad to blocks, multiply by scale (chain rule), then reshape back
+                    grad_blocked = grad_direction.reshape(M // block_size, block_size, N // block_size, block_size)
+                    grad_blocked = grad_blocked.permute(0, 2, 1, 3)
+                    scale_broadcast = scale.unsqueeze(-1).unsqueeze(-1)
+                    grad_scaled = grad_blocked * scale_broadcast
+                    grad_scaled = grad_scaled.permute(0, 2, 1, 3).reshape(M, N)
+                elif scaling_mode == "row":
+                    if scale.dim() == 1:
+                        scale_broadcast = scale.unsqueeze(1)
+                    else:
+                        scale_broadcast = scale
+                    grad_scaled = grad_direction * scale_broadcast
+                else:
+                    raise ValueError(f"Unsupported scaling mode: {scaling_mode}")
 
                 q_refined -= curr_lr * grad_scaled
 
