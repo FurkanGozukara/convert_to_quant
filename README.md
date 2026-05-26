@@ -12,7 +12,7 @@
 ## Installation
 
 ```bash
-pip install convert_to_quant
+pip install convert-to-quant
 ```
 
 **Or install from source:**
@@ -57,14 +57,16 @@ pip install torch --index-url https://download.pytorch.org/whl/cu128
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
-### 2. Optional: Triton (needed for blockwise INT8)
+### 2. Optional: Triton (needed for INT8)
 
 ```bash
 # Linux
 pip install -U triton
 
-# Windows (Example for torch>=2.9)
-pip install -U "triton-windows<3.6"
+# Windows for torch 2.10 and 2.11
+pip install -U "triton-windows<3.7"
+# Windows for torch 2.12
+pip install -U "triton-windows<3.8"
 ```
 
 ---
