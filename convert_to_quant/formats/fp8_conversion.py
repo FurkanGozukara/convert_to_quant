@@ -482,7 +482,7 @@ def convert_to_fp8_scaled(
                     block_size_for_meta = layer_block_size
 
                 # Use correct INT8 format
-                comfy_quant_tensor = create_comfy_quant_tensor(comfy_quant_format, block_size=block_size_for_meta, full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None, convrot=convrot_applied)
+                comfy_quant_tensor = create_comfy_quant_tensor(comfy_quant_format, block_size=block_size_for_meta, full_precision_matrix_mult=layer_full_precision_mm if layer_full_precision_mm else None, convrot=convrot_applied, convrot_groupsize=convrot_group_size if convrot_applied else None)
                 # Add input_scale only for block-wise INT8 (dynamic quantization for rowwise doesn't use it)
                 if comfy_quant_format == "int8_blockwise":
                     new_tensors[f"{base_name}.input_scale"] = torch.tensor(1.0, dtype=torch.float32, device="cpu")
@@ -534,6 +534,7 @@ def convert_to_fp8_scaled(
                     meta_entry["full_precision_matrix_mult"] = True
                 if convrot_applied:
                     meta_entry["convrot"] = True
+                    meta_entry["convrot_groupsize"] = convrot_group_size
 
                 quant_metadata_layers[base_name] = meta_entry
 

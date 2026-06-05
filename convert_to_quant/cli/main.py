@@ -104,6 +104,8 @@ def get_parser() -> MultiHelpArgumentParser:
     parser.add_argument("-o", "--output", type=str, help="Output safetensors file path. Auto-generated if not provided.")
     parser.add_argument("--comfy_quant", "--comfy-quant", action="store_true", dest="comfy_quant", help="Use Comfy quantization method.")
     parser.add_argument("--int8", action="store_true", help="Use INT8 block-wise quantization instead of FP8.")
+    parser.add_argument("--convrot", action="store_true", help="Enable group-wise Hadamard rotation (ConvRot) for INT8 row-wise quantization to improve quality.")
+    parser.add_argument("--convrot-group-size", "--convrot_group_size", type=int, default=256, dest="convrot_group_size", help="Group size for ConvRot (must be power of 4: 4, 16, 64, 256, 1024). Default: 256")
     parser.add_argument("--nvfp4", action="store_true", help="Use NVFP4 (FP4 E2M1) block quantization. Requires Blackwell GPU (SM >= 10.0/12.0) for inference.")
     parser.add_argument("--mxfp8", action="store_true", help="Use MXFP8 (Microscaling FP8) block quantization. Requires Blackwell GPU (SM >= 10.0) for inference.")
     parser.add_argument("--make-hybrid-mxfp8", "--make_hybrid_mxfp8", action="store_true", dest="make_hybrid_mxfp8", help="Convert an existing MXFP8 model to Hybrid MXFP8 (adds tensorwise fallback for Ada GPUs).")
@@ -753,6 +755,8 @@ def run_conversion(args):
         custom_scaling_mode=args.custom_scaling_mode,
         custom_simple=args.custom_simple,
         custom_heur=args.custom_heur,
+        convrot=args.convrot,
+        convrot_group_size=args.convrot_group_size,
         # Fallback options
         fallback_block_size=args.fallback_block_size,
         fallback_simple=args.fallback_simple,
