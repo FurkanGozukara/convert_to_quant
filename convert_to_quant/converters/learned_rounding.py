@@ -859,17 +859,19 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             if optimizer is not None:
                 optimizer.zero_grad()
 
-            # Forward pass: soft rounding
+            # Forward pass: Straight-Through Estimator (STE) for hard quantization differences
             h_V = torch.sigmoid(V)
-            W_q_soft = W_floor + h_V
-            W_soft_dequant = W_q_soft * scale_broadcast
+            W_q_hard = W_floor + (h_V >= 0.5).float()
+            # STE Trick: forward pass uses hard discretized weights, backward pass uses soft weights
+            W_q = (W_q_hard - h_V).detach() + h_V
+            W_dequant = W_q * scale_broadcast
 
-            # Loss 1: Output activation MSE
-            Y_pred = X_rot @ W_soft_dequant.T
+            # Loss 1: Output activation MSE on hard-quantized weights
+            Y_pred = X_rot @ W_dequant.T
             loss_mse = torch.nn.functional.mse_loss(Y_pred, Y_ref)
 
             # Loss 2: SVD-guided weight-space projection error
-            weight_error = W_soft_dequant - W_float32
+            weight_error = W_dequant - W_float32
             projected_error = U_k.T @ weight_error @ Vh_k.T
             loss_svd = torch.linalg.norm(projected_error)
 
