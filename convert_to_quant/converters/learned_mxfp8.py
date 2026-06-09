@@ -247,6 +247,12 @@ class LearnedMXFP8Converter(BaseLearnedConverter):
 
         # Cleanup SVD tensors
         self._cleanup_tensors(U_k, Vh_k)
+        U_k = None
+        Vh_k = None
+        W_float32 = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return qdata, block_scales_e8m0, block_scales_f32
 
@@ -489,13 +495,19 @@ class LearnedMXFP8Converter(BaseLearnedConverter):
                 worse_loss_counter += 1
                 plateau_counter += 1
 
+            # Prodigy Warm-up: Skip LR decay for first 50 iterations
+            prodigy_warmup = (self.optimizer_choice == "prodigy" and i < 50)
+
             # LR schedule update
             if schedule_name == "exponential":
-                curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
-                for pg in optimizer.param_groups:
-                    pg["lr"] = curr_lr
+                if not prodigy_warmup:
+                    curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
+                    for pg in optimizer.param_groups:
+                        pg["lr"] = curr_lr
             elif schedule_name == "plateau":
-                if cooldown_counter > 0:
+                if prodigy_warmup:
+                    plateau_counter = 0 # Keep inactive
+                elif cooldown_counter > 0:
                     cooldown_counter -= 1
                     debug(f"      [LR] Cooldown: {cooldown_counter} left")
                 elif plateau_counter >= effective_patience:
@@ -614,13 +626,19 @@ class LearnedMXFP8Converter(BaseLearnedConverter):
                 worse_loss_counter += 1
                 plateau_counter += 1
 
+            # Prodigy Warm-up: Skip LR decay for first 50 iterations
+            prodigy_warmup = (self.optimizer_choice == "prodigy" and i < 50)
+
             # LR schedule update
             if schedule_name == "exponential":
-                curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
-                for pg in optimizer.param_groups:
-                    pg["lr"] = curr_lr
+                if not prodigy_warmup:
+                    curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
+                    for pg in optimizer.param_groups:
+                        pg["lr"] = curr_lr
             elif schedule_name == "plateau":
-                if cooldown_counter > 0:
+                if prodigy_warmup:
+                    plateau_counter = 0 # Keep inactive
+                elif cooldown_counter > 0:
                     cooldown_counter -= 1
                     debug(f"      [LR] Cooldown: {cooldown_counter} left")
                 elif plateau_counter >= effective_patience:

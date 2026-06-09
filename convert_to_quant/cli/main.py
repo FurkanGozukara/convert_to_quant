@@ -145,6 +145,7 @@ def get_parser() -> MultiHelpArgumentParser:
 
     parser.add_argument("--block_size", "--block-size", "--group_size", "--group-size", type=int, default=None, dest="block_size", help="Block/group size for block-wise quantization. Defaults to 128 when using block scaling mode. Common values: 64, 128.")
     parser.add_argument("--calib_samples", "--calib-samples", type=int, default=3072, dest="calib_samples", help="Number of random samples for bias correction.")
+    parser.add_argument("--calib_cpu", "--calib-cpu", action="store_true", dest="calib_cpu", help="Store calibration data cache on CPU instead of disk (when using --low-memory). Always True if --low-memory is not used.")
     parser.add_argument("--manual_seed", "--manual-seed", type=int, default=-1, dest="manual_seed", help="Set a manual seed for reproducibility. Use -1 for random.")
     parser.add_argument("--optimizer", type=str, default="prodigy", choices=["original", "adamw", "radam", "prodigy"], help="Optimization algorithm.")
     parser.add_argument("--num_iter", "--num-iter", type=int, default=4000, dest="num_iter", help="Total optimization iterations per tensor.")
@@ -167,7 +168,7 @@ def get_parser() -> MultiHelpArgumentParser:
     # NVFP4 scale optimization (--help-advanced)
     parser.add_argument("--scale-refinement", "--scale_refinement", type=int, default=1, dest="scale_refinement_rounds", help="[NVFP4] Number of scale refinement rounds for 'iterative' mode (default: 1)")
     parser.add_argument(
-        "--scale-optimization", "--scale_optimization", type=str, default="fixed", dest="scale_optimization", choices=["fixed", "iterative", "joint"], help="[NVFP4] Scale optimization mode: 'fixed' (default, scales computed once), 'iterative' (scales recomputed periodically), 'joint' (STE-based joint optimization)"
+        "--scale-optimization", "--scale_optimization", type=str, default="fixed", dest="scale_optimization", choices=["fixed", "iterative", "joint", "dualround"], help="Scale optimization mode: 'fixed' (default), 'iterative', 'joint', 'dualround' (dual-pass AdaRound for INT8)"
     )
     parser.add_argument("--top_p", "--top-p", type=float, default=0.2, dest="top_p", help="Proportion of principal components (SVD) to use.")
     parser.add_argument("--min_k", "--min-k", type=int, default=256, dest="min_k", help="Minimum number of principal components.")
@@ -742,6 +743,7 @@ def run_conversion(args):
         filter_flags=filter_flags,
         # Calibration
         calib_samples=args.calib_samples,
+        calib_cpu=args.calib_cpu,
         seed=seed,
         # Format options
         int8=args.int8,
@@ -797,6 +799,8 @@ def run_conversion(args):
         early_stop_loss=args.early_stop_loss,
         early_stop_lr=args.early_stop_lr,
         early_stop_stall=args.early_stop_stall,
+        # Scale optimization
+        scale_optimization=args.scale_optimization,
         # Prodigy specific
         use_speed=args.use_speed,
         # LoRA options

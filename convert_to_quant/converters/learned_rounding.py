@@ -28,7 +28,7 @@ class LearnedRoundingConverter(BaseLearnedConverter):
     Adds format-specific: target_format, scaling_mode, block_size.
     """
 
-    def __init__(self, scaling_mode: str = "tensor", block_size: int = 64, target_format: str = "fp8", lr: float = 1.0, extract_lora: bool = False, lora_rank: int = 32, lora_depth: int = 1, lora_target: Optional[str] = None, lora_ar_threshold: float = 0.0, convrot: bool = False, convrot_group_size: int = 256, **kwargs):
+    def __init__(self, scaling_mode: str = "tensor", block_size: int = 64, target_format: str = "fp8", lr: float = 1.0, extract_lora: bool = False, lora_rank: int = 32, lora_depth: int = 1, lora_target: Optional[str] = None, lora_ar_threshold: float = 0.0, convrot: bool = False, convrot_group_size: int = 256, scale_optimization: str = "fixed", **kwargs):
         """
         Initialize FP8/INT8 converter.
 
@@ -38,6 +38,7 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             target_format: Target format ("fp8" or "int8")
             convrot: Enable Hadamard rotation for INT8 row-wise quantization
             convrot_group_size: Group size for ConvRot (default 256)
+            scale_optimization: Scale optimization mode (default "fixed")
             **kwargs: All other args passed to BaseLearnedConverter
         """
         super().__init__(lr=lr, extract_lora=extract_lora, lora_rank=lora_rank, lora_depth=lora_depth, lora_target=lora_target, lora_ar_threshold=lora_ar_threshold, **kwargs)
@@ -46,6 +47,7 @@ class LearnedRoundingConverter(BaseLearnedConverter):
         self.target_format = target_format
         self.convrot = convrot
         self.convrot_group_size = convrot_group_size
+        self.scale_optimization = scale_optimization
 
         # INT8 defaults to block-wise scaling, but allows tensor-wise and row-wise
         if target_format == "int8" and scaling_mode not in ("tensor", "row", "block"):
@@ -78,6 +80,8 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             verbose(f"    - Block size: {self.block_size}")
         if self.convrot:
             verbose(f"  - ConvRot (Hadamard rotation) enabled: group_size={self.convrot_group_size}")
+
+        self.calib_scale = 1.0
 
     def _optimize_adamw(self, W_float32: torch.Tensor, scale: torch.Tensor, U_k: torch.Tensor, Vh_k: torch.Tensor) -> torch.Tensor:
         """FP8 optimization using AdamW optimizer with manual LR scheduling."""
@@ -336,13 +340,19 @@ class LearnedRoundingConverter(BaseLearnedConverter):
                 worse_loss_counter += 1
                 plateau_counter += 1
 
+            # Prodigy Warm-up: Skip LR decay for first 50 iterations
+            prodigy_warmup = (self.optimizer_choice == "prodigy" and i < 50)
+
             # Manual LR update based on schedule
             if schedule_name == "exponential":
-                curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
-                for param_group in optimizer.param_groups:
-                    param_group["lr"] = curr_lr
+                if not prodigy_warmup:
+                    curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
+                    for param_group in optimizer.param_groups:
+                        param_group["lr"] = curr_lr
             elif schedule_name == "plateau":
-                if cooldown_counter > 0:
+                if prodigy_warmup:
+                    plateau_counter = 0 # Keep inactive
+                elif cooldown_counter > 0:
                     cooldown_counter -= 1
                     debug(f"      [LR] Cooldown: {cooldown_counter} left")
                 elif plateau_counter >= effective_patience:
@@ -527,71 +537,141 @@ class LearnedRoundingConverter(BaseLearnedConverter):
 
     def convert(self, W_orig: torch.Tensor, key: Optional[str] = None, depth: int = -1, calibration_data: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict]:
         self._current_extra_tensors = {}
-        W_float32 = transfer_to_gpu_pinned(W_orig, self.device, COMPUTE_DTYPE)
 
-        # Determine if we should optimize
-        if torch.all(W_float32 == 0):
-            verbose("  - Tensor is all zeros, skipping optimization.")
-            quantized_tensor = torch.zeros_like(W_float32, dtype=self.target_dtype)
-            dequant_scale = None
+        # 1. Initialize State
+        attempt = 1
+        max_attempts = 10
+        orig_top_p = self.top_p
+        orig_max_k = self.max_k
+        orig_min_k = self.min_k
+        self.calib_scale = 1.0
 
-            if W_float32.ndim == 2:
-                out_features, in_features = W_float32.shape
+        try:
+            while True:
+                try:
+                    # Clear current extra tensors at start of attempt
+                    self._current_extra_tensors = {}
 
-                if self.target_format == "int8":
-                    # INT8 uses 2D block scaling (M//block_size, N//block_size)
-                    num_blocks_m = out_features // self.block_size
-                    num_blocks_n = in_features // self.block_size
-                    dequant_scale = torch.ones(num_blocks_m, num_blocks_n, device=self.device, dtype=SCALE_DTYPE)
-                elif self.scaling_mode == "row":
-                    # Row-wise: one scale per row
-                    dequant_scale = torch.ones(out_features, device=self.device, dtype=SCALE_DTYPE)
-                elif self.scaling_mode in ("block", "block2d") and out_features % self.block_size == 0 and in_features % self.block_size == 0:
-                    # 2D block-wise: (M//bs, N//bs) - 'block' is primary, 'block2d' deprecated alias
-                    num_blocks_m = out_features // self.block_size
-                    num_blocks_n = in_features // self.block_size
-                    dequant_scale = torch.ones(num_blocks_m, num_blocks_n, device=self.device, dtype=SCALE_DTYPE)
-                elif self.scaling_mode == "block3d" and in_features > 0 and in_features % self.block_size == 0:
-                    # Per-row-group 3D: (out_features, num_blocks, 1)
-                    num_blocks = in_features // self.block_size
-                    dequant_scale = torch.ones(out_features, num_blocks, 1, device=self.device, dtype=SCALE_DTYPE)
-                else:
-                    # Tensor-wise: single scale
-                    dequant_scale = torch.ones(1, device=self.device, dtype=SCALE_DTYPE)
-            else:
-                dequant_scale = torch.ones(1, device=self.device, dtype=SCALE_DTYPE)
+                    W_float32 = transfer_to_gpu_pinned(W_orig, self.device, COMPUTE_DTYPE)
 
-            return quantized_tensor, dequant_scale, torch.zeros_like(W_float32), {}
+                    # Determine if we should optimize
+                    if torch.all(W_float32 == 0):
+                        verbose("  - Tensor is all zeros, skipping optimization.")
+                        quantized_tensor = torch.zeros_like(W_float32, dtype=self.target_dtype)
+                        dequant_scale = None
 
-        # INT8 quantization path
-        if self.target_format == "int8":
-            if self.scaling_mode in ("tensor", "row"):
-                qdata, scale, dequantized = self._convert_int8_tensorwise(W_float32, calibration_data=calibration_data)
-            else:
-                qdata, scale, dequantized = self._convert_int8(W_float32)
-        else:
-            # FP8 quantization path - route based on scaling_mode
-            if self.scaling_mode == "row":
-                qdata, scale, dequantized = self._convert_fp8_rowwise(W_float32)
-            elif self.scaling_mode in ("block", "block2d"):
-                # 2D block-wise - 'block' is primary, 'block2d' is deprecated alias
-                qdata, scale, dequantized = self._convert_fp8_block2d(W_float32)
-            elif self.scaling_mode == "block3d":
-                # 3D per-row-group mode (legacy)
-                qdata, scale, dequantized = self._convert_fp8(W_float32)
-            else:
-                # 'tensor' mode
-                qdata, scale, dequantized = self._convert_fp8(W_float32)
+                        if W_float32.ndim == 2:
+                            out_features, in_features = W_float32.shape
 
-        # Error Correction LoRA extraction
-        extra_tensors = self._current_extra_tensors.copy()
-        self._current_extra_tensors.clear()
-        if self._should_extract_lora(key, W_orig.shape, depth):
-            lora_data = self._extract_error_lora(W_float32, dequantized)
-            if lora_data:
-                extra_tensors.update(lora_data)
+                            if self.target_format == "int8":
+                                # INT8 uses 2D block scaling (M//block_size, N//block_size)
+                                num_blocks_m = out_features // self.block_size
+                                num_blocks_n = in_features // self.block_size
+                                dequant_scale = torch.ones(num_blocks_m, num_blocks_n, device=self.device, dtype=SCALE_DTYPE)
+                            elif self.scaling_mode == "row":
+                                # Row-wise: one scale per row
+                                dequant_scale = torch.ones(out_features, device=self.device, dtype=SCALE_DTYPE)
+                            elif self.scaling_mode in ("block", "block2d") and out_features % self.block_size == 0 and in_features % self.block_size == 0:
+                                # 2D block-wise: (M//bs, N//bs) - 'block' is primary, 'block2d' deprecated alias
+                                num_blocks_m = out_features // self.block_size
+                                num_blocks_n = in_features // self.block_size
+                                dequant_scale = torch.ones(num_blocks_m, num_blocks_n, device=self.device, dtype=SCALE_DTYPE)
+                            elif self.scaling_mode == "block3d" and in_features > 0 and in_features % self.block_size == 0:
+                                # Per-row-group 3D: (out_features, num_blocks, 1)
+                                num_blocks = in_features // self.block_size
+                                dequant_scale = torch.ones(out_features, num_blocks, 1, device=self.device, dtype=SCALE_DTYPE)
+                            else:
+                                # Tensor-wise: single scale
+                                dequant_scale = torch.ones(1, device=self.device, dtype=SCALE_DTYPE)
+                        else:
+                            dequant_scale = torch.ones(1, device=self.device, dtype=SCALE_DTYPE)
 
-        return qdata, scale, dequantized, extra_tensors
+                        return quantized_tensor, dequant_scale, torch.zeros_like(W_float32), {}
+
+                    # INT8 quantization path
+                    if self.target_format == "int8":
+                        if self.scaling_mode in ("tensor", "row"):
+                            qdata, scale, dequantized = self._convert_int8_tensorwise(W_float32, calibration_data=calibration_data)
+                        else:
+                            qdata, scale, dequantized = self._convert_int8(W_float32)
+                    else:
+                        # FP8 quantization path - route based on scaling_mode
+                        if self.scaling_mode == "row":
+                            qdata, scale, dequantized = self._convert_fp8_rowwise(W_float32)
+                        elif self.scaling_mode in ("block", "block2d"):
+                            # 2D block-wise - 'block' is primary, 'block2d' is deprecated alias
+                            qdata, scale, dequantized = self._convert_fp8_block2d(W_float32)
+                        elif self.scaling_mode == "block3d":
+                            # 3D per-row-group mode (legacy)
+                            qdata, scale, dequantized = self._convert_fp8(W_float32)
+                        else:
+                            # 'tensor' mode
+                            qdata, scale, dequantized = self._convert_fp8(W_float32)
+
+                    # Error Correction LoRA extraction
+                    extra_tensors = self._current_extra_tensors.copy()
+                    self._current_extra_tensors.clear()
+                    if self._should_extract_lora(key, W_orig.shape, depth):
+                        lora_data = self._extract_error_lora(W_float32, dequantized)
+                        if lora_data:
+                            extra_tensors.update(lora_data)
+
+                    return qdata, scale, dequantized, extra_tensors
+
+                except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+                    is_oom = isinstance(e, torch.cuda.OutOfMemoryError) or (
+                        isinstance(e, RuntimeError) and any(
+                            msg in str(e).lower() for msg in ["out of memory", "cuda out of memory", "oom"]
+                        )
+                    )
+                    if not is_oom:
+                        raise e
+
+                    verbose(f"    - [OOM Warning] Out of memory during layer conversion (attempt {attempt}/{max_attempts}).")
+
+                    # Perform aggressive cleanup
+                    try:
+                        del W_float32
+                    except NameError:
+                        pass
+                    try:
+                        del qdata
+                    except NameError:
+                        pass
+                    try:
+                        del scale
+                    except NameError:
+                        pass
+                    try:
+                        del dequantized
+                    except NameError:
+                        pass
+
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+                    # Shrink Parameters
+                    self.top_p *= 0.7
+                    self.max_k = int(self.max_k * 0.7)
+                    self.min_k = int(self.min_k * 0.7)
+                    self.calib_scale *= 0.5
+
+                    verbose(f"    - [OOM Warning] Reduced parameters: top_p={self.top_p:.4f}, max_k={self.max_k}, min_k={self.min_k}, calib_scale={self.calib_scale:.4f}")
+
+                    # Check for fatal failure (too many attempts or params reached floor)
+                    if attempt >= max_attempts or (self.max_k < 1 and self.min_k < 1 and self.top_p < 1e-4):
+                        verbose(f"    - [OOM Error] OOM mitigation failed (attempt {attempt}/{max_attempts}, max_k: {self.max_k}). Re-raising OOM.")
+                        raise e
+
+                    attempt += 1
+
+        finally:
+            # Restore State
+            self.top_p = orig_top_p
+            self.max_k = orig_max_k
+            self.min_k = orig_min_k
+            self.calib_scale = 1.0
 
     def _convert_int8(self, W_float32: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -660,7 +740,7 @@ class LearnedRoundingConverter(BaseLearnedConverter):
         if self.convrot and self.scaling_mode == "row" and convrot_applied:
             from ..utils.tensor_utils import prepare_calibration_data
             X_rot, Y_ref, H_mat = prepare_calibration_data(
-                W_float32, calibration_data, True, self.convrot_group_size, self.device, COMPUTE_DTYPE
+                W_float32, calibration_data, True, self.convrot_group_size, self.device, COMPUTE_DTYPE, calib_scale=self.calib_scale
             )
             verbose("    - Executed Phase 2: Calibration Data Management (Captured X, rotated X, computed reference Y)")
 
@@ -684,7 +764,28 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             if self.scaling_mode == "tensor":
                 qdata, scale = self._optimize_int8_tensorwise_learned_rounding(W_float32, qdata, scale)
             elif self.convrot and self.scaling_mode == "row" and X_rot is not None:
-                qdata, scale = self._optimize_int8_adaround(W_float32, qdata, scale, X_rot, Y_ref)
+                if self.scale_optimization == "dualround":
+                    verbose("    - Scale Optimization: DUALROUND (Pass 1)")
+                    qdata, scale = self._optimize_int8_adaround(W_float32, qdata, scale, X_rot, Y_ref)
+
+                    # Scale Re-Estimation
+                    verbose("    - Scale Optimization: Re-estimating scales based on Pass 1 output...")
+                    dequant_opt = TensorWiseINT8Layout.dequantize(qdata, scale, orig_dtype=COMPUTE_DTYPE)
+                    row_max_opt = dequant_opt.abs().amax(dim=1, keepdim=True)
+                    scale_opt = row_max_opt.clamp_min(1e-12) / 127.0
+                    qdata, _ = TensorWiseINT8Layout.quantize(W_float32, scale=scale_opt, is_weight=True)
+                    scale = scale_opt.squeeze(1) if scale.dim() == 1 else scale_opt
+
+                    # Clean up Pass 1 intermediate tensors immediately to prevent VRAM accumulation
+                    del dequant_opt, row_max_opt, scale_opt
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+                    verbose("    - Scale Optimization: DUALROUND (Pass 2)")
+                    qdata, scale = self._optimize_int8_adaround(W_float32, qdata, scale, X_rot, Y_ref)
+                else:
+                    qdata, scale = self._optimize_int8_adaround(W_float32, qdata, scale, X_rot, Y_ref)
             else:
                 qdata, scale = self._optimize_int8_learned_rounding(W_float32, qdata, scale, scaling_mode="row")
 
@@ -816,7 +917,10 @@ class LearnedRoundingConverter(BaseLearnedConverter):
         # Target fraction for soft rounding
         target = W_scaled - W_floor
         target = torch.clamp(target, min=1e-6, max=1.0 - 1e-6)
-        V_init = -torch.log((1.0 / target) - 1.0)
+        
+        # Temperature schedule for sigmoid (AdaRound paper: start soft, sharpen over time)
+        T_start, T_end = 20.0, 2.0
+        V_init = -torch.log((1.0 / target) - 1.0) * T_start
         V = V_init.clone().detach().requires_grad_(True)
 
         # 3. Setup optimizer
@@ -861,18 +965,19 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             if optimizer is not None:
                 optimizer.zero_grad()
 
-            # Forward pass: Straight-Through Estimator (STE) for hard quantization differences
-            h_V = torch.sigmoid(V)
-            W_q_hard = W_floor + (h_V >= 0.5).float()
-            # STE Trick: forward pass uses hard discretized weights, backward pass uses soft weights
-            W_q = (W_q_hard - h_V).detach() + h_V
+            # Forward pass: Optimized soft rounding (smooth AdaRound)
+            # Calculate current temperature (linear decay from T_start to T_end)
+            temp = T_start + (T_end - T_start) * (i / self.num_iter)
+            h_V = torch.sigmoid(V / temp)
+            # Use soft weights for smooth gradient flow during optimization
+            W_q = W_floor + h_V
             W_dequant = W_q * scale_broadcast
 
-            # Loss 1: Output activation MSE on hard-quantized weights
+            # Loss 1: Output activation MSE on soft dequantized weights
             Y_pred = X_rot @ W_dequant.T
             loss_mse = torch.nn.functional.mse_loss(Y_pred, Y_ref)
 
-            # Loss 2: SVD-guided weight-space projection error
+            # Loss 2: SVD-guided weight-space projection error (soft)
             weight_error = W_dequant - W_float32
             projected_error = U_k.T @ weight_error @ Vh_k.T
             loss_svd = torch.linalg.norm(projected_error)
@@ -880,19 +985,35 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             # Loss 3: Soft rounding binary regularizer
             loss_reg = (1.0 - (2.0 * h_V - 1.0).pow(2)).mean()
 
-            # Total Loss
-            loss = loss_mse + alpha_svd * loss_svd + lambda_reg * loss_reg
+            # Total Loss - Normalized for numerical stability on real-world weights
+            # We scale MSE and SVD losses so they start relative to 1.0
+            loss_mse_scaled = loss_mse / max(init_mse_rounded.item(), 1e-12)
+            
+            if alpha_svd > 0 and init_svd_rounded.item() > 1e-8:
+                loss_svd_scaled = loss_svd / init_svd_rounded.item()
+            else:
+                loss_svd_scaled = 0.0
+                
+            # Combine with fixed weights: 1.0 for MSE, 0.01 for SVD, 0.1 for Reg
+            loss = loss_mse_scaled + 0.01 * loss_svd_scaled + 0.1 * loss_reg
+
+            # Scale up loss for backpropagation to prevent float32 underflow on large layers
+            scaled_loss = loss * 1e5
 
             if optimizer is not None:
-                loss.backward()
+                scaled_loss.backward()
+                if V.grad is not None:
+                    # Scale gradients back down before optimizer steps to protect scale-sensitive optimizers (e.g. Prodigy distance estimator)
+                    V.grad.div_(1e5)
                 optimizer.step()
             else:
                 # Manual SGD
                 if V.grad is not None:
                     V.grad.zero_()
-                loss.backward()
+                scaled_loss.backward()
                 with torch.no_grad():
-                    V -= curr_lr * V.grad
+                    # Divide gradient back down to match manual learning rate scale
+                    V -= curr_lr * (V.grad / 1e5)
 
             current_loss_val = loss.item()
             prev_worse_counter = worse_loss_counter
@@ -909,14 +1030,20 @@ class LearnedRoundingConverter(BaseLearnedConverter):
                 worse_loss_counter += 1
                 plateau_counter += 1
 
+            # Prodigy Warm-up: Skip LR decay for first 50 iterations
+            prodigy_warmup = (self.optimizer_choice == "prodigy" and i < 50)
+
             # Schedule-based learning rate adjustments
             if schedule_name == "exponential":
-                curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
-                if optimizer is not None:
-                    for param_group in optimizer.param_groups:
-                        param_group["lr"] = curr_lr
+                if not prodigy_warmup:
+                    curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
+                    if optimizer is not None:
+                        for param_group in optimizer.param_groups:
+                            param_group["lr"] = curr_lr
             elif schedule_name == "plateau":
-                if cooldown_counter > 0:
+                if prodigy_warmup:
+                    plateau_counter = 0 # Keep inactive
+                elif cooldown_counter > 0:
                     cooldown_counter -= 1
                     debug(f"      [LR] Cooldown: {cooldown_counter} left")
                 elif plateau_counter >= effective_patience:
@@ -972,6 +1099,18 @@ class LearnedRoundingConverter(BaseLearnedConverter):
             verbose(f"    - Discretization audit: {converged_pct:.2f}% of parameters converged to strict boundaries.")
 
         self._cleanup_tensors(U_k, Vh_k, V)
+        U_k = None
+        Vh_k = None
+        V = None
+        best_V = None
+        W_scaled = None
+        W_floor = None
+        X_rot = None
+        Y_ref = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         return final_qdata, scale
 
     def _optimize_int8_learned_rounding(self, W_float32: torch.Tensor, qdata: torch.Tensor, scale: torch.Tensor, scaling_mode: str = "block") -> Tuple[torch.Tensor, torch.Tensor]:
@@ -1050,13 +1189,19 @@ class LearnedRoundingConverter(BaseLearnedConverter):
                 worse_loss_counter += 1
                 plateau_counter += 1
 
+            # Prodigy Warm-up: Skip LR decay for first 50 iterations
+            prodigy_warmup = (self.optimizer_choice == "prodigy" and i < 50)
+
             # Manual LR update based on schedule (matching _optimize_int8_original)
             if schedule_name == "exponential":
-                curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
-                for param_group in optimizer.param_groups:
-                    param_group["lr"] = curr_lr
+                if not prodigy_warmup:
+                    curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
+                    for param_group in optimizer.param_groups:
+                        param_group["lr"] = curr_lr
             elif schedule_name == "plateau":
-                if cooldown_counter > 0:
+                if prodigy_warmup:
+                    plateau_counter = 0 # Keep inactive
+                elif cooldown_counter > 0:
                     cooldown_counter -= 1
                     debug(f"      [LR] Cooldown: {cooldown_counter} left")
                 elif plateau_counter >= self.lr_patience:
@@ -1159,13 +1304,19 @@ class LearnedRoundingConverter(BaseLearnedConverter):
                 worse_loss_counter += 1
                 plateau_counter += 1
 
+            # Prodigy Warm-up: Skip LR decay for first 50 iterations
+            prodigy_warmup = (self.optimizer_choice == "prodigy" and i < 50)
+
             # Manual LR update based on schedule (matching _optimize_int8_original)
             if schedule_name == "exponential":
-                curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
-                for param_group in optimizer.param_groups:
-                    param_group["lr"] = curr_lr
+                if not prodigy_warmup:
+                    curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
+                    for param_group in optimizer.param_groups:
+                        param_group["lr"] = curr_lr
             elif schedule_name == "plateau":
-                if cooldown_counter > 0:
+                if prodigy_warmup:
+                    plateau_counter = 0 # Keep inactive
+                elif cooldown_counter > 0:
                     cooldown_counter -= 1
                     debug(f"      [LR] Cooldown: {cooldown_counter} left")
                 elif plateau_counter >= self.lr_patience:
@@ -1270,12 +1421,19 @@ class LearnedRoundingConverter(BaseLearnedConverter):
                 worse_loss_counter += 1
                 plateau_counter += 1
 
+            # Prodigy Warm-up: Skip LR decay for first 50 iterations
+            prodigy_warmup = (self.optimizer_choice == "prodigy" and i < 50)
+
+            # Manual LR update based on schedule
             if schedule_name == "exponential":
-                curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
-                for param_group in optimizer.param_groups:
-                    param_group["lr"] = curr_lr
+                if not prodigy_warmup:
+                    curr_lr = max(curr_lr * self.lr_gamma, self.lr_min)
+                    for param_group in optimizer.param_groups:
+                        param_group["lr"] = curr_lr
             elif schedule_name == "plateau":
-                if cooldown_counter > 0:
+                if prodigy_warmup:
+                    plateau_counter = 0 # Keep inactive
+                elif cooldown_counter > 0:
                     cooldown_counter -= 1
                 elif plateau_counter >= self.lr_patience:
                     if curr_lr > self.lr_min:
