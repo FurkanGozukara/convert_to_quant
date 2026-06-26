@@ -330,6 +330,10 @@ def convert_to_fp8_scaled(
                     layer_format = "fp8"
                 elif fmt.startswith("int8"):
                     layer_format = "int8"
+                elif fmt == "mxfp8":
+                    layer_format = "mxfp8"
+                elif fmt == "nvfp4":
+                    layer_format = "nvfp4"
                 else:
                     layer_format = "fp8"  # fallback
 

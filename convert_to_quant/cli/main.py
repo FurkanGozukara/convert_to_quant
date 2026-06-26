@@ -320,7 +320,7 @@ def run_conversion(args):
     # Handle NVFP4 quantization mode (separate workflow OR unified if mixing formats)
     if args.nvfp4:
         # Check if we need mixed format support
-        needs_mixing = args.custom_type or args.fallback
+        needs_mixing = args.custom_type or args.fallback or args.layer_config
 
         if needs_mixing:
             # Route through unified path for mixed format support
@@ -442,7 +442,7 @@ def run_conversion(args):
     # Handle MXFP8 quantization mode (separate workflow OR unified if mixing formats)
     if args.mxfp8:
         # Check if we need mixed format support
-        needs_mixing = args.custom_type or args.fallback
+        needs_mixing = args.custom_type or args.fallback or args.layer_config
 
         if needs_mixing:
             # Route through unified path for mixed format support
@@ -725,9 +725,9 @@ def run_conversion(args):
     # Call convert_to_fp8_scaled with explicit args (no **kwargs footgun)
     # Determine primary_format for NVFP4/MXFP8 mixed mode (when they fall through here)
     primary_format = None
-    if args.nvfp4 and (args.custom_type or args.fallback):
+    if args.nvfp4 and (args.custom_type or args.fallback or args.layer_config):
         primary_format = "nvfp4"
-    elif args.mxfp8 and (args.custom_type or args.fallback):
+    elif args.mxfp8 and (args.custom_type or args.fallback or args.layer_config):
         primary_format = "mxfp8"
 
     convert_to_fp8_scaled(
